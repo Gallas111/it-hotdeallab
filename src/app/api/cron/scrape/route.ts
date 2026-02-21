@@ -4,13 +4,12 @@ import * as cheerio from "cheerio";
 import { OpenAI } from "openai";
 import { prisma } from "@/lib/prisma";
 
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
-
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export async function GET(request: Request) {
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     try {
         // 1. FMKorea 핫딜 게시판 크롤링 (컴퓨터/가전 키워드 위주)
         const { data: html } = await axios.get("https://www.fmkorea.com/hotdeal", {
