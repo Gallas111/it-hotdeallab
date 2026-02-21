@@ -28,7 +28,18 @@ export async function GET(request: Request) {
         const $ = cheerio.load(html);
         const deals: { title: string; link: string; mallName: string }[] = [];
 
-        // 클리앙 게시판 아이템 파싱
+        // 클리앙 게시판 아이템 파싱 (다양한 셀렉터 시도)
+        const selectorTests = {
+            list_item: $(".list_item").length,
+            list_content: $(".list_content").length,
+            board_list: $(".board-list").length,
+            subject_fixed: $(".subject_fixed").length,
+            list_subject: $(".list_subject").length,
+            links: $("a[data-role='list-title-text']").length,
+            total_links: $("a").length,
+        };
+
+        // 방법 1: .list_item 셀렉터
         $(".list_item").each((i, el) => {
             if (i > 15) return;
 
@@ -44,15 +55,59 @@ export async function GET(request: Request) {
                 ? href
                 : "https://www.clien.net" + href;
 
-            // [쇼핑몰] 형식에서 쇼핑몰 이름 추출
             const mallMatch = title.match(/\[(.*?)\]/);
             const mallName = mallMatch ? mallMatch[1] : "기타";
 
             deals.push({ title, link, mallName });
         });
 
+        // 방법 2: list_item이 없으면 모든 링크에서 핫딜 패턴 매칭
+        if (deals.length === 0) {
+            $("a").each((i, el) => {
+                const href = $(el).attr("href") || "";
+                const text = $(el).text().trim();
+
+                // 클리앙 게시글 링크 패턴: /service/board/jirum/숫자
+                if (href.includes("/service/board/jirum/") && text.length > 5 && !text.includes("알뜰구매") && !text.includes("이용규칙")) {
+                    const link = href.startsWith("http")
+                        ? href
+                        : "https://www.clien.net" + href;
+
+                    const mallMatch = text.match(/\[(.*?)\]/);
+                    const mallName = mallMatch ? mallMatch[1] : "기타";
+
+                    deals.push({ title: text, link, mallName });
+                }
+            });
+            // 중복 제거
+            const uniqueLinks = new Set<string>();
+            const uniqueDeals: typeof deals = [];
+            for (const d of deals) {
+                const cleanLink = d.link.split("?")[0];
+                if (!uniqueLinks.has(cleanLink)) {
+                    uniqueLinks.add(cleanLink);
+                    uniqueDeals.push(d);
+                }
+            }
+            deals.length = 0;
+            deals.push(...uniqueDeals.slice(0, 15));
+        }
+
         // 2. AI 판별 및 저장 로직
         const results: string[] = [];
+
+        // 디버깅: 게시글이 없으면 셀렉터 정보 반환
+        if (deals.length === 0) {
+            return NextResponse.json({
+                success: true,
+                added: [],
+                debug: {
+                    message: "게시글을 찾지 못했습니다.",
+                    selectors: selectorTests,
+                    htmlSample: html.substring(0, 2000),
+                },
+            });
+        }
         for (const deal of deals) {
             // 중복 체크
             const exists = await prisma.product.findFirst({
