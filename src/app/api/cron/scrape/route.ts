@@ -11,36 +11,40 @@ export const maxDuration = 60;
 export async function GET(request: Request) {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     try {
-        // 1. FMKorea 핫딜 게시판 크롤링 (헤더 보강)
-        const { data: html } = await axios.get("https://www.fmkorea.com/hotdeal", {
-            headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-                "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-                "Referer": "https://www.google.com/",
-                "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                "sec-ch-ua-mobile": "?0",
-                "sec-ch-ua-platform": '"Windows"',
-                "Upgrade-Insecure-Requests": "1"
-            },
-        });
+        // 1. 클리앙 알뜰구매 게시판 크롤링 (상품정보 카테고리)
+        const { data: html } = await axios.get(
+            "https://www.clien.net/service/board/jirum?category=1000236",
+            {
+                headers: {
+                    "User-Agent":
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+                    Referer: "https://www.clien.net/service/",
+                },
+            }
+        );
 
         const $ = cheerio.load(html);
-        const deals: any[] = [];
+        const deals: { title: string; link: string; mallName: string }[] = [];
 
-        // 에펨코리아의 다양한 리스트 구조 대응
-        $(".fm_best_widget ul li, .li").each((i, el) => {
+        // 클리앙 게시판 아이템 파싱
+        $(".list_item").each((i, el) => {
             if (i > 15) return;
 
-            const titleEl = $(el).find(".title a");
+            const titleEl = $(el).find(".list_subject .subject_fixed");
             if (titleEl.length === 0) return;
 
-            let title = titleEl.text().trim().replace(/\t|\n/g, "");
-            const link = "https://www.fmkorea.com" + titleEl.attr("href");
+            let title = titleEl.text().trim();
+            if (!title) return;
 
-            // 제목에서 댓글 수 제거 (예: [34])
-            title = title.replace(/\[\d+\]$/, "").trim();
+            const href = $(el).find(".list_subject a").attr("href");
+            if (!href) return;
+            const link = href.startsWith("http")
+                ? href
+                : "https://www.clien.net" + href;
 
+            // [쇼핑몰] 형식에서 쇼핑몰 이름 추출
             const mallMatch = title.match(/\[(.*?)\]/);
             const mallName = mallMatch ? mallMatch[1] : "기타";
 
@@ -48,7 +52,7 @@ export async function GET(request: Request) {
         });
 
         // 2. AI 판별 및 저장 로직
-        const results = [];
+        const results: string[] = [];
         for (const deal of deals) {
             // 중복 체크
             const exists = await prisma.product.findFirst({
@@ -89,16 +93,21 @@ export async function GET(request: Request) {
                 response_format: { type: "json_object" },
             });
 
-            const aiData = JSON.parse(completion.choices[0].message.content || "{}");
+            const aiData = JSON.parse(
+                completion.choices[0].message.content || "{}"
+            );
 
             if (aiData.isIT) {
                 // DB 저장
-                const slug = deal.title
-                    .replace(/\[.*?\]/g, "")
-                    .trim()
-                    .toLowerCase()
-                    .replace(/[^a-z0-9ㄱ-ㅎㅏ-ㅣ가-힣 ]/g, "")
-                    .replace(/\s+/g, "-") + "-" + Date.now();
+                const slug =
+                    deal.title
+                        .replace(/\[.*?\]/g, "")
+                        .trim()
+                        .toLowerCase()
+                        .replace(/[^a-z0-9ㄱ-ㅎㅏ-ㅣ가-힣 ]/g, "")
+                        .replace(/\s+/g, "-") +
+                    "-" +
+                    Date.now();
 
                 const newProduct = await prisma.product.create({
                     data: {
@@ -106,7 +115,12 @@ export async function GET(request: Request) {
                         slug: slug,
                         originalPrice: aiData.originalPrice || 0,
                         salePrice: aiData.salePrice || 0,
-                        discountPercent: Math.round(((aiData.originalPrice - aiData.salePrice) / aiData.originalPrice) * 100) || 0,
+                        discountPercent:
+                            Math.round(
+                                ((aiData.originalPrice - aiData.salePrice) /
+                                    aiData.originalPrice) *
+                                100
+                            ) || 0,
                         category: aiData.category,
                         mallName: deal.mallName,
                         sourceUrl: deal.link,
@@ -114,7 +128,7 @@ export async function GET(request: Request) {
                         aiPros: aiData.aiPros,
                         aiTarget: aiData.aiTarget,
                         seoContent: aiData.seoContent,
-                        affiliateLink: deal.link, // 임시로 원문 링크 사용 (수익 링크 전환은 추후 단계)
+                        affiliateLink: deal.link,
                         isActive: true,
                     },
                 });
@@ -125,6 +139,9 @@ export async function GET(request: Request) {
         return NextResponse.json({ success: true, added: results });
     } catch (error: any) {
         console.error("Scrape Error:", error);
-        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+        return NextResponse.json(
+            { success: false, error: error.message },
+            { status: 500 }
+        );
     }
 }
