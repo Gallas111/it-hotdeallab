@@ -1,0 +1,28 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Product {
+  id              String   @id @default(cuid())
+  title           String
+  slug            String   @unique
+  imageUrl        String?  // 상품 이미지 URL 추가
+  originalPrice   Int
+  salePrice       Int
+  discountPercent Int
+  category        String
+  mallName        String   // 쇼핑몰 이름 (예: 쿠팡, 11번가) 추가
+  sourceUrl       String   // 원문 또는 제휴 링크 원본 주소 추가
+  aiSummary       String
+  aiPros          String   // 장점 3개 등을 저장 (JSON 또는 쉼표 구분)
+  aiTarget        String
+  seoContent      String   // 1000자 이상의 SEO용 텍스트 저장
+  affiliateLink   String   // 최종 쿠팡 파트너스 링크
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}

@@ -1,65 +1,81 @@
-import Image from "next/image";
+import DealCard from "@/components/DealCard";
+import { prisma } from "@/lib/prisma";
 
-export default function Home() {
+// Mock data generator for initial verification
+const getMockDeals = () => [
+  {
+    id: "1",
+    title: "[쿠팡] LG전자 27인치 4K UHD 모니터 27UP850N IPS HDR400",
+    slug: "lg-27inch-4k-monitor-sale",
+    imageUrl: null,
+    originalPrice: 620000,
+    salePrice: 449000,
+    discountPercent: 28,
+    mallName: "쿠팡",
+    category: "모니터/주변기기",
+    createdAt: new Date(),
+  },
+  {
+    id: "2",
+    title: "Apple 2024 맥북 에어 13 M3 8GB 256GB 실버",
+    slug: "macbook-air-m3-13-discount",
+    imageUrl: null,
+    originalPrice: 1590000,
+    salePrice: 1390000,
+    discountPercent: 12,
+    mallName: "11번가",
+    category: "Apple",
+    createdAt: new Date(),
+  },
+];
+
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ category?: string }>;
+}) {
+  const resolvedParams = await searchParams;
+  const deals = getMockDeals().filter(d =>
+    !resolvedParams.category || d.category === resolvedParams.category
+  );
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className="flex flex-col gap-10">
+      <div className="flex items-center justify-between border-b border-gray-100 pb-6 dark:border-white/5">
+        <h2 className="text-xl font-black text-[var(--foreground)] tracking-tight flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-[var(--primary)]"></span>
+          실시간 인기 핫딜
+        </h2>
+        <div className="flex gap-2">
+          <button className="text-[12px] font-bold text-gray-400 hover:text-[var(--primary)] transition-colors">최신순</button>
+          <span className="text-[12px] text-gray-200">|</span>
+          <button className="text-[12px] font-bold text-gray-400 hover:text-[var(--primary)] transition-colors">인기순</button>
+        </div>
+      </div>
+
+      <div className="grid gap-6 sm:grid-cols-1 lg:grid-cols-2">
+        {deals.length > 0 ? (
+          deals.map((deal) => (
+            <DealCard key={deal.id} product={deal} />
+          ))
+        ) : (
+          <div className="flex h-64 flex-col items-center justify-center text-gray-400 col-span-full">
+            <span className="text-4xl mb-4">🔍</span>
+            <p className="text-sm font-bold">현재 등록된 핫딜이 없습니다.</p>
+          </div>
+        )}
+      </div>
+
+      {/* Footer Meta */}
+      <div className="py-20 text-center">
+        <div className="inline-flex flex-col items-center gap-4">
+          <div className="h-[1px] w-12 bg-gray-100 dark:bg-white/5"></div>
+          <p className="text-[10px] font-black text-gray-300 uppercase tracking-[0.3em]">
+            IT HOTDEAL LAB CURATION
           </p>
+          <div className="h-[1px] w-12 bg-gray-100 dark:bg-white/5"></div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      </div>
     </div>
   );
 }

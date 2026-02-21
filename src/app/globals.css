@@ -1,26 +1,191 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Colors - Clean Community Palette */
+  --background: #f8f9fb;
+  --foreground: #1d1d1f;
+  --muted: #f1f3f5;
+  --border: #eaeaea;
+
+  /* Action Colors */
+  --primary: #ff3b30;
+  /* Apple Red */
+  --secondary: #007aff;
+  --accent: #ff9500;
+
+  --font-sans: "Inter", "Pretendard", system-ui, -apple-system, sans-serif;
+  --card-bg: #ffffff;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-secondary: var(--secondary);
+  --color-accent: var(--accent);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #121212;
+    --foreground: #f5f5f7;
+    --muted: #1c1c1e;
+    --border: #2c2c2e;
+    --card-bg: #1c1c1e;
   }
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  line-height: 1.6;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* Layout Container System (V3) */
+.global-container {
+  @apply mx-auto w-full max-w-[1200px];
+}
+
+.main-layout {
+  @apply mx-auto flex w-full max-w-[1200px] flex-col bg-white dark:bg-[#121212];
+  padding-left: 24px;
+  padding-right: 24px;
+}
+
+@media (max-width: 640px) {
+  .main-layout {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
+
+.detail-layout {
+  @apply mx-auto w-full max-w-[1200px] py-8 flex flex-col gap-8;
+}
+
+.content-container {
+  @apply mx-auto w-full max-w-[920px] flex flex-col gap-8;
+}
+
+/* Premium Card & Shadow System */
+.card-section {
+  @apply rounded-3xl bg-white p-8 transition-all duration-300 dark:bg-[#1c1c1e];
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+}
+
+.premium-shadow {
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.04);
+}
+
+.dark .premium-shadow {
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+}
+
+/* Image Container */
+.image-box {
+  @apply relative overflow-hidden rounded-2xl bg-[#f5f6f8] dark:bg-white/5 border border-[var(--border)];
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.02);
+}
+
+/* List Item Row Style */
+.deal-row {
+  @apply flex gap-4 border-b border-[var(--border)] bg-[var(--card-bg)] p-4 transition-colors hover:bg-gray-50 dark:hover:bg-white/5 relative;
+}
+
+/* Pill Tabs & Sliding System */
+.tab-pill {
+  @apply relative z-10 rounded-full px-5 py-2 text-[14px] font-bold transition-all whitespace-nowrap active:scale-95;
+}
+
+.tab-pill-active {
+  @apply text-white;
+}
+
+.tab-pill-inactive {
+  @apply text-gray-500 hover:text-gray-800 dark:hover:text-gray-200;
+}
+
+/* Typography & Elements */
+.title-text {
+  @apply text-[17px] font-bold leading-snug tracking-tight text-[var(--foreground)] line-clamp-2 mb-1;
+}
+
+.price-accent {
+  @apply text-lg font-extrabold text-[var(--primary)];
+}
+
+.price-original {
+  @apply text-xs text-gray-400 line-through ml-1;
+}
+
+.discount-badge {
+  @apply text-sm font-black text-[var(--primary)] ml-1;
+}
+
+.meta-info {
+  @apply text-[12px] text-gray-400 font-medium;
+}
+
+.mall-tag {
+  @apply rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-bold text-gray-600 dark:bg-gray-800 dark:text-gray-400;
+}
+
+.category-tag {
+  @apply rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-bold text-[var(--primary)] dark:bg-red-950/30;
+}
+
+.meta-link {
+  @apply flex items-center gap-1 text-[13px] font-medium text-gray-400 hover:text-gray-600 transition-colors;
+}
+
+/* CTA Styles */
+.btn-cta {
+  @apply flex w-full items-center justify-center rounded-[14px] bg-gradient-to-b from-[var(--primary)] to-[#e63226] py-5 text-[19px] font-extrabold text-white transition-all active:scale-[0.97] hover:brightness-105 shadow-lg shadow-red-500/10;
+}
+
+/* Glassmorphism & UI Utils */
+.glass-input {
+  @apply bg-gray-100/50 backdrop-blur-md border border-transparent w-48;
+  transition: all 500ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.glass-input:focus {
+  @apply bg-white/80 border-[var(--primary)] w-64;
+  box-shadow: 0 0 20px rgba(255, 59, 48, 0.15);
+}
+
+.dark .glass-input {
+  @apply bg-white/5;
+}
+
+.dark .glass-input:focus {
+  @apply bg-white/10;
+}
+
+/* Tab Animation Indicator */
+.tab-indicator {
+  @apply absolute bottom-0 left-0 h-full bg-[var(--primary)] rounded-full -z-10;
+  transition: all 500ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Utils */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
