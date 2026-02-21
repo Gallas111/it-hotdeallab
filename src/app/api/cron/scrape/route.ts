@@ -11,24 +11,36 @@ export const maxDuration = 60;
 export async function GET(request: Request) {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     try {
-        // 1. FMKorea 핫딜 게시판 크롤링 (컴퓨터/가전 키워드 위주)
+        // 1. FMKorea 핫딜 게시판 크롤링 (헤더 보강)
         const { data: html } = await axios.get("https://www.fmkorea.com/hotdeal", {
             headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+                "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+                "Referer": "https://www.google.com/",
+                "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"Windows"',
+                "Upgrade-Insecure-Requests": "1"
             },
         });
 
         const $ = cheerio.load(html);
         const deals: any[] = [];
 
-        $(".fm_best_widget ul li .body").each((i, el) => {
-            if (i > 10) return; // 최신 10개만 확인
+        // 에펨코리아의 다양한 리스트 구조 대응
+        $(".fm_best_widget ul li, .li").each((i, el) => {
+            if (i > 15) return;
 
             const titleEl = $(el).find(".title a");
-            const title = titleEl.text().trim().replace(/\t|\n/g, "");
+            if (titleEl.length === 0) return;
+
+            let title = titleEl.text().trim().replace(/\t|\n/g, "");
             const link = "https://www.fmkorea.com" + titleEl.attr("href");
 
-            // 카테고리 추출 (에펨코리아 특성상 [쇼핑몰] 제목 형식)
+            // 제목에서 댓글 수 제거 (예: [34])
+            title = title.replace(/\[\d+\]$/, "").trim();
+
             const mallMatch = title.match(/\[(.*?)\]/);
             const mallName = mallMatch ? mallMatch[1] : "기타";
 

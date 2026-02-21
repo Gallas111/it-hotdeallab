@@ -4,43 +4,25 @@ import { Suspense } from "react";
 
 export const dynamic = "force-dynamic";
 
-// Mock data generator for initial verification
-const getMockDeals = () => [
-  {
-    id: "1",
-    title: "[쿠팡] LG전자 27인치 4K UHD 모니터 27UP850N IPS HDR400",
-    slug: "lg-27inch-4k-monitor-sale",
-    imageUrl: null,
-    originalPrice: 620000,
-    salePrice: 449000,
-    discountPercent: 28,
-    mallName: "쿠팡",
-    category: "모니터/주변기기",
-    createdAt: new Date(),
-  },
-  {
-    id: "2",
-    title: "Apple 2024 맥북 에어 13 M3 8GB 256GB 실버",
-    slug: "macbook-air-m3-13-discount",
-    imageUrl: null,
-    originalPrice: 1590000,
-    salePrice: 1390000,
-    discountPercent: 12,
-    mallName: "11번가",
-    category: "Apple",
-    createdAt: new Date(),
-  },
-];
-
 export default async function Home({
   searchParams,
 }: {
   searchParams: Promise<{ category?: string }>;
 }) {
   const resolvedParams = await searchParams;
-  const deals = getMockDeals().filter(d =>
-    !resolvedParams.category || d.category === resolvedParams.category
-  );
+  const category = resolvedParams.category;
+
+  // 실제 DB에서 데이터 가져오기 (최신순 20개)
+  const deals = await prisma.product.findMany({
+    where: {
+      isActive: true,
+      ...(category && category !== "전체" ? { category } : {}),
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    take: 20,
+  });
 
   return (
     <div className="flex flex-col gap-10">
