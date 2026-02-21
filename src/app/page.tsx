@@ -1,5 +1,8 @@
 import DealCard from "@/components/DealCard";
 import { prisma } from "@/lib/prisma";
+import { Suspense } from "react";
+
+export const dynamic = "force-dynamic";
 
 // Mock data generator for initial verification
 const getMockDeals = () => [

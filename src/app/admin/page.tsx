@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
+
+export const dynamic = "force-dynamic";
 
 export default function AdminPage() {
     const [title, setTitle] = useState("");

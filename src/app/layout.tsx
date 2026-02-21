@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import CategoryFilter from "@/components/CategoryFilter";
@@ -26,7 +27,9 @@ export default function RootLayout({
       <body className="flex min-h-screen justify-center bg-[var(--background)]">
         <div className="main-layout premium-shadow">
           <Header />
-          <CategoryFilter />
+          <Suspense fallback={null}>
+            <CategoryFilter />
+          </Suspense>
           <main className="flex-1 py-8">{children}</main>
           <Footer />
         </div>
