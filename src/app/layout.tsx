@@ -11,7 +11,7 @@ export const metadata: Metadata = {
     default: "IT핫딜랩 - 실시간 IT/가전 핫딜 모음",
     template: "%s | IT핫딜랩",
   },
-  description: "클리앙, 뽐뿌, 퀘이사존의 IT·가전 핫딜을 AI로 분석해 한곳에서 모아봅니다. 최신 IT 기기·가전제품 최저가 할인 정보를 실시간으로 확인하세요.",
+  description: "매일 쏟아지는 IT/가전 핫딜, 한눈에. 최신 IT 기기·가전제품 최저가 할인 정보를 실시간으로 확인하세요.",
   keywords: ["IT핫딜", "가전제품 할인", "핫딜", "핫딜모음", "IT할인", "전자기기 핫딜", "최저가", "쿠팡핫딜", "다나와핫딜", "노트북 할인", "스마트폰 할인"],
   authors: [{ name: "IT핫딜랩", url: "https://ithotdealab.com" }],
   creator: "IT핫딜랩",
@@ -21,12 +21,12 @@ export const metadata: Metadata = {
     url: "https://ithotdealab.com",
     siteName: "IT핫딜랩",
     title: "IT핫딜랩 - 실시간 IT/가전 핫딜 모음",
-    description: "클리앙, 뽐뿌, 퀘이사존의 IT·가전 핫딜을 AI로 분석해 한곳에서 모아봅니다.",
+    description: "매일 쏟아지는 IT/가전 핫딜, 한눈에.",
   },
   twitter: {
     card: "summary_large_image",
     title: "IT핫딜랩 - 실시간 IT/가전 핫딜 모음",
-    description: "클리앙, 뽐뿌, 퀘이사존의 IT·가전 핫딜을 AI로 분석해 한곳에서 모아봅니다.",
+    description: "매일 쏟아지는 IT/가전 핫딜, 한눈에.",
   },
   verification: {
     google: "BPEPStceyj8JVwc0yyAvoJa2im--ULbmuajiSz7CYSo",
