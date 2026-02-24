@@ -35,70 +35,45 @@ function normalizeImgUrl(url: string | undefined, baseUrl: string): string | nul
     return null;
 }
 
-async function fetchImageForProduct(
-    sourceUrl: string,
-    affiliateLink: string
-): Promise<string | null> {
-    const referer = `https://${new URL(sourceUrl).hostname}/`;
-
-    // 1. 포스트 페이지에서 og:image 추출
+// 쇼핑몰 상품 페이지에서 og:image 추출
+// 커뮤니티 사이트 이미지는 핫링크 차단되어 사용 불가 → 쇼핑몰만 사용
+async function fetchShopImage(shopUrl: string): Promise<string | null> {
     try {
-        const { data: html } = await axios.get(sourceUrl, {
-            headers: { ...HEADERS, Referer: referer },
+        const { data: html } = await axios.get(shopUrl, {
+            headers: { ...HEADERS, Referer: shopUrl },
             timeout: 10000,
+            maxRedirects: 5,
         });
         const $ = cheerio.load(html);
-
-        // og:image
-        const ogRaw = $('meta[property="og:image"]').attr("content")
-            || $('meta[name="og:image"]').attr("content");
-        const ogImg = normalizeImgUrl(ogRaw, sourceUrl);
-        if (ogImg) return ogImg;
-
-        // 본문 이미지
-        const selectors = [
-            ".post_content img", ".view-content img", ".fr-view img",
-            ".cont img", ".board_view img", "article img",
-        ];
-        for (const sel of selectors) {
-            const raw = $(sel).first().attr("src");
-            const normalized = normalizeImgUrl(raw, sourceUrl);
-            if (normalized) return normalized;
-        }
-    } catch { /* 포스트 요청 실패 시 쇼핑몰 페이지 시도 */ }
-
-    // 2. 쇼핑몰 상품 페이지 og:image (affiliateLink가 실제 쇼핑몰인 경우)
-    if (isShopLink(affiliateLink)) {
-        try {
-            const { data: html } = await axios.get(affiliateLink, {
-                headers: { ...HEADERS, Referer: affiliateLink },
-                timeout: 8000,
-                maxRedirects: 5,
-            });
-            const $ = cheerio.load(html);
-            const raw = $('meta[property="og:image"]').attr("content")
-                || $('meta[name="og:image"]').attr("content");
-            const normalized = normalizeImgUrl(raw, affiliateLink);
-            if (normalized) return normalized;
-        } catch { /* skip */ }
+        const raw = $('meta[property="og:image"]').attr("content")
+            || $('meta[name="og:image"]').attr("content")
+            || $('meta[property="product:image"]').attr("content");
+        return normalizeImgUrl(raw, shopUrl);
+    } catch {
+        return null;
     }
-
-    return null;
 }
 
 export async function POST() {
     try {
+        // imageUrl이 없는 상품 중 affiliateLink가 실제 쇼핑몰인 것만 처리
         const products = await prisma.product.findMany({
             where: { imageUrl: null },
-            select: { id: true, sourceUrl: true, affiliateLink: true },
+            select: { id: true, affiliateLink: true },
             take: 30,
         });
 
         let updated = 0;
+        let skipped = 0;
 
         for (const p of products) {
+            // 커뮤니티 링크면 스킵 (이미지 핫링크 차단)
+            if (!isShopLink(p.affiliateLink)) {
+                skipped++;
+                continue;
+            }
             try {
-                const imageUrl = await fetchImageForProduct(p.sourceUrl, p.affiliateLink);
+                const imageUrl = await fetchShopImage(p.affiliateLink);
                 if (imageUrl) {
                     await prisma.product.update({
                         where: { id: p.id },
@@ -113,6 +88,7 @@ export async function POST() {
             success: true,
             total: products.length,
             updated,
+            skipped,
         });
     } catch (error: any) {
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });

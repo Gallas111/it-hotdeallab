@@ -40,7 +40,7 @@ function toCoupangAffiliateLink(url: string): string {
     }
 }
 
-// ─── 이미지 URL 정규화 (//, /, http 모두 처리) ──────────────
+// URL 정규화 (//, /, http 모두 처리)
 function normalizeImgUrl(url: string | undefined, baseUrl: string): string | null {
     if (!url) return null;
     const u = url.trim();
@@ -55,88 +55,76 @@ function normalizeImgUrl(url: string | undefined, baseUrl: string): string | nul
 
 type RawDeal = { title: string; link: string; mallName: string; source: string; imageUrl?: string };
 
-// ─── 포스트 단일 페치 → 쇼핑몰 링크 + 이미지 동시 추출 ─────
-async function fetchShopLinkAndImage(
-    postUrl: string,
-    referer: string
-): Promise<{ shopLink: string | null; imageUrl: string | null }> {
+// ─── 커뮤니티 포스트에서 쇼핑몰 링크 추출 ─────────────────────
+async function fetchShopLink(postUrl: string, referer: string): Promise<string | null> {
     try {
         const { data: html } = await axios.get(postUrl, {
             headers: { ...HEADERS, Referer: referer },
             timeout: 10000,
         });
         const $ = cheerio.load(html);
-
-        // ── 이미지: og:image 우선, 본문 이미지 폴백 ──────────
-        let imageUrl: string | null = null;
-        const ogRaw = $('meta[property="og:image"]').attr("content")
-            || $('meta[name="og:image"]').attr("content");
-        imageUrl = normalizeImgUrl(ogRaw, postUrl);
-
-        if (!imageUrl) {
-            const selectors = [
-                ".post_content img", ".view-content img", ".fr-view img",
-                ".cont img", ".board_view img", "article img", ".article-body img",
-            ];
-            for (const sel of selectors) {
-                const raw = $(sel).first().attr("src");
-                const normalized = normalizeImgUrl(raw, postUrl);
-                if (normalized) { imageUrl = normalized; break; }
-            }
-        }
-
-        // ── 쇼핑몰 링크 ──────────────────────────────────────
-        let shopLink: string | null = null;
+        let found: string | null = null;
 
         // 1. 본문 내 링크 우선
         $(".post_content, .post-content, .view-content, .cont, .fr-view, .board_view, article").find("a[href]").each((_, el) => {
-            if (shopLink) return;
+            if (found) return;
             const href = $(el).attr("href") || "";
-            if (href.startsWith("http") && isShopLink(href)) shopLink = href;
+            if (href.startsWith("http") && isShopLink(href)) found = href;
         });
 
-        // 2. 리다이렉트/go.php 패턴
-        if (!shopLink) {
+        // 2. 리다이렉트 패턴
+        if (!found) {
             $("a[href*='redirect'], a[href*='go.php'], a[href*='link?']").each((_, el) => {
-                if (shopLink) return;
+                if (found) return;
                 const href = $(el).attr("href") || "";
                 const m = href.match(/[?&]url=([^&]+)/);
                 if (m) {
                     try {
                         const decoded = decodeURIComponent(m[1]);
-                        if (isShopLink(decoded)) shopLink = decoded;
+                        if (isShopLink(decoded)) found = decoded;
                     } catch { /* skip */ }
                 }
             });
         }
 
-        // 3. 전체 페이지 링크
-        if (!shopLink) {
+        // 3. 전체 페이지
+        if (!found) {
             $("a[href]").each((_, el) => {
-                if (shopLink) return;
+                if (found) return;
                 const href = $(el).attr("href") || "";
-                if (href.startsWith("http") && isShopLink(href)) shopLink = href;
+                if (href.startsWith("http") && isShopLink(href)) found = href;
             });
         }
 
-        return { shopLink, imageUrl };
+        return found;
     } catch {
-        return { shopLink: null, imageUrl: null };
+        return null;
     }
 }
 
-// ─── 쇼핑몰 상품 페이지의 og:image 추출 (폴백용) ────────────
-async function fetchShopPageImage(shopUrl: string): Promise<string | null> {
+// ─── 쇼핑몰 상품 페이지 og:image 추출 ────────────────────────
+// 쿠팡/11번가/지마켓 등 CDN 이미지 → 핫링크 없음, 실제 상품 사진
+async function fetchShopImage(shopUrl: string): Promise<string | null> {
     try {
         const { data: html } = await axios.get(shopUrl, {
             headers: { ...HEADERS, Referer: shopUrl },
-            timeout: 8000,
+            timeout: 10000,
             maxRedirects: 5,
         });
         const $ = cheerio.load(html);
-        const raw = $('meta[property="og:image"]').attr("content")
+
+        // og:image 우선
+        const ogRaw = $('meta[property="og:image"]').attr("content")
             || $('meta[name="og:image"]').attr("content");
-        return normalizeImgUrl(raw, shopUrl);
+        const ogImg = normalizeImgUrl(ogRaw, shopUrl);
+        if (ogImg) return ogImg;
+
+        // product 이미지 메타
+        const productImg = $('meta[property="product:image"]').attr("content");
+        const productNorm = normalizeImgUrl(productImg, shopUrl);
+        if (productNorm) return productNorm;
+
+        return null;
     } catch {
         return null;
     }
@@ -175,12 +163,7 @@ async function scrapeClien(): Promise<RawDeal[]> {
             if (!href) return;
             const link = href.startsWith("http") ? href : "https://www.clien.net" + href;
             const mallMatch = title.match(/\[(.*?)\]/);
-
-            // 목록 페이지 썸네일 직접 추출 (추가 요청 불필요)
-            const thumbRaw = $(el).find(".list_thumbnail img, .thumb img, img.thumb, .thumbnail img").attr("src");
-            const imageUrl = normalizeImgUrl(thumbRaw, "https://www.clien.net") || undefined;
-
-            deals.push({ title, link, mallName: mallMatch?.[1] || "기타", source: "클리앙", imageUrl });
+            deals.push({ title, link, mallName: mallMatch?.[1] || "기타", source: "클리앙" });
         });
 
         // 폴백
@@ -221,24 +204,14 @@ async function scrapePpomppu(): Promise<RawDeal[]> {
 
         $("tr.list0, tr.list1").each((i, el) => {
             if (i >= 15) return;
-
             const titleEl = $(el).find("a.title, .title a, td.title a").first();
             const title = titleEl.text().trim();
             if (!title || title.length < 5) return;
-
             const href = titleEl.attr("href") || $(el).find("a[href*='view.php']").attr("href") || "";
             if (!href) return;
             const link = href.startsWith("http") ? href : "https://www.ppomppu.co.kr" + href;
-
             const mallMatch = title.match(/\[([^\]]+)\]/);
-            const mallName = mallMatch?.[1] || "뽐뿌";
-
-            // 목록 썸네일
-            const thumbRaw = $(el).find("img.thumb, td.thumb img, img[src*='thumb']").attr("src")
-                || $(el).find("img").first().attr("src");
-            const imageUrl = normalizeImgUrl(thumbRaw, "https://www.ppomppu.co.kr") || undefined;
-
-            deals.push({ title, link, mallName, source: "뽐뿌", imageUrl });
+            deals.push({ title, link, mallName: mallMatch?.[1] || "뽐뿌", source: "뽐뿌" });
         });
 
         return deals;
@@ -248,7 +221,7 @@ async function scrapePpomppu(): Promise<RawDeal[]> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 소스 3: 퀘이사존 세일정보 (IT 전문)
+// 소스 3: 퀘이사존 세일정보
 // ═══════════════════════════════════════════════════════════
 async function scrapeQuasarzone(): Promise<RawDeal[]> {
     try {
@@ -264,20 +237,12 @@ async function scrapeQuasarzone(): Promise<RawDeal[]> {
             const titleEl = $(el).find(".tit, .title, a.subject").first();
             const title = titleEl.text().trim();
             if (!title || title.length < 5) return;
-
             const href = titleEl.closest("a").attr("href") || titleEl.attr("href") || $(el).find("a").first().attr("href") || "";
             if (!href) return;
             const link = href.startsWith("http") ? href : "https://quasarzone.com" + href;
-
             const priceEl = $(el).find(".sale-price, .price").first().text().trim();
             const mallMatch = title.match(/\[([^\]]+)\]/);
-            const mallName = mallMatch?.[1] || "퀘이사존";
-
-            // 목록 썸네일
-            const thumbRaw = $(el).find("img").first().attr("src");
-            const imageUrl = normalizeImgUrl(thumbRaw, "https://quasarzone.com") || undefined;
-
-            deals.push({ title: title + (priceEl ? ` ${priceEl}` : ""), link, mallName, source: "퀘이사존", imageUrl });
+            deals.push({ title: title + (priceEl ? ` ${priceEl}` : ""), link, mallName: mallMatch?.[1] || "퀘이사존", source: "퀘이사존" });
         });
 
         // 폴백
@@ -329,10 +294,9 @@ async function scrapeNaverShopping(): Promise<RawDeal[]> {
                 const link = item.link || item.mallUrl;
                 if (!link || seen.has(link)) continue;
                 seen.add(link);
-
                 const title = item.title?.replace(/<[^>]+>/g, "") || "";
                 if (!title) continue;
-
+                // 네이버 쇼핑 API 이미지는 CDN URL → 핫링크 없음
                 deals.push({
                     title: `[${item.mallName || "네이버"}] ${title} ${item.lprice ? item.lprice + "원" : ""}`,
                     link,
@@ -376,7 +340,6 @@ export async function GET() {
         const results: string[] = [];
 
         for (const deal of allDeals) {
-            // 중복 체크
             const exists = await prisma.product.findFirst({ where: { sourceUrl: deal.link } });
             if (exists) continue;
 
@@ -405,24 +368,25 @@ IT 맞으면:
 
             if (!aiData.isIT) continue;
 
-            // 이미지 + 쇼핑몰 링크 처리
+            // ── 이미지 + 쇼핑몰 링크 처리 ────────────────────────
             const referer = `https://${new URL(deal.link).hostname}/`;
             let affiliateLink = deal.link;
+            // 네이버쇼핑 API 이미지는 CDN → 바로 사용
             let imageUrl: string | null = deal.imageUrl || null;
 
             if (!isShopLink(deal.link)) {
-                // 포스트 단일 fetch → 쇼핑몰 링크 + 이미지 동시 추출
-                const { shopLink, imageUrl: postImage } = await fetchShopLinkAndImage(deal.link, referer);
+                // 커뮤니티 포스트 → 쇼핑몰 링크 추출
+                const shopLink = await fetchShopLink(deal.link, referer);
                 affiliateLink = shopLink || deal.link;
-                if (!imageUrl) imageUrl = postImage;
 
-                // 포스트에서 이미지 못 찾으면 쇼핑몰 상품 페이지 og:image 시도
-                if (!imageUrl && shopLink) {
-                    imageUrl = await fetchShopPageImage(shopLink);
+                // 쇼핑몰 링크가 있으면 해당 상품 페이지에서 이미지 추출
+                // 커뮤니티 사이트 이미지는 핫링크 차단 → 사용 안 함
+                if (shopLink && !imageUrl) {
+                    imageUrl = await fetchShopImage(shopLink);
                 }
             } else if (!imageUrl) {
-                // 이미 쇼핑몰 링크인 경우 (네이버쇼핑 이미지 없는 케이스) 상품 페이지에서 추출
-                imageUrl = await fetchShopPageImage(deal.link);
+                // 이미 쇼핑몰 링크인 경우 상품 페이지 이미지
+                imageUrl = await fetchShopImage(deal.link);
             }
 
             affiliateLink = toCoupangAffiliateLink(affiliateLink);
