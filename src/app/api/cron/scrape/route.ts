@@ -40,7 +40,31 @@ function toCoupangAffiliateLink(url: string): string {
     }
 }
 
-type RawDeal = { title: string; link: string; mallName: string; source: string };
+type RawDeal = { title: string; link: string; mallName: string; source: string; imageUrl?: string };
+
+// ─── 이미지 추출 (og:image 우선) ─────────────────────────────
+async function fetchImageFromPost(postUrl: string, referer: string): Promise<string | null> {
+    try {
+        const { data: html } = await axios.get(postUrl, {
+            headers: { ...HEADERS, Referer: referer },
+            timeout: 8000,
+        });
+        const $ = cheerio.load(html);
+
+        // 1. og:image (가장 신뢰도 높음)
+        const ogImage = $('meta[property="og:image"]').attr("content")
+            || $('meta[name="og:image"]').attr("content");
+        if (ogImage && ogImage.startsWith("http")) return ogImage;
+
+        // 2. 본문 첫 번째 이미지
+        const contentImg = $(".post_content img, .view-content img, .fr-view img, .cont img").first().attr("src");
+        if (contentImg && contentImg.startsWith("http")) return contentImg;
+
+        return null;
+    } catch {
+        return null;
+    }
+}
 
 // ─── 쇼핑몰 링크 추출 ────────────────────────────────────────
 async function fetchShopLink(postUrl: string, referer: string): Promise<string | null> {
@@ -274,6 +298,7 @@ async function scrapeNaverShopping(): Promise<RawDeal[]> {
                     link,
                     mallName: item.mallName || "네이버쇼핑",
                     source: "네이버쇼핑",
+                    imageUrl: item.image || undefined,
                 });
             }
         } catch { /* 개별 쿼리 실패 시 건너뜀 */ }
@@ -341,11 +366,19 @@ IT 맞으면:
 
             if (!aiData.isIT) continue;
 
-            // 실제 쇼핑몰 링크 추출 (네이버 쇼핑은 이미 쇼핑몰 링크)
+            // 쇼핑몰 링크 + 이미지 병렬 추출
+            const referer = `https://${new URL(deal.link).hostname}/`;
             let affiliateLink = deal.link;
+            let imageUrl: string | null = deal.imageUrl || null;
+
             if (!isShopLink(deal.link)) {
-                const shopLink = await fetchShopLink(deal.link, `https://${new URL(deal.link).hostname}/`);
+                // 게시글에서 쇼핑몰 링크 + 이미지 동시 추출
+                const [shopLink, postImage] = await Promise.all([
+                    fetchShopLink(deal.link, referer),
+                    imageUrl ? Promise.resolve(null) : fetchImageFromPost(deal.link, referer),
+                ]);
                 affiliateLink = shopLink || deal.link;
+                if (!imageUrl && postImage) imageUrl = postImage;
             }
             // 쿠팡 링크면 파트너스 ID 적용
             affiliateLink = toCoupangAffiliateLink(affiliateLink);
@@ -360,6 +393,7 @@ IT 맞으면:
                 data: {
                     title: aiData.refinedTitle || deal.title,
                     slug: generateSlug(deal.title),
+                    imageUrl: imageUrl || undefined,
                     originalPrice,
                     salePrice,
                     discountPercent,

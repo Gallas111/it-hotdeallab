@@ -14,6 +14,7 @@ export default async function AdminPage() {
             discountPercent: true,
             mallName: true,
             affiliateLink: true,
+            imageUrl: true,
             createdAt: true,
         },
     });

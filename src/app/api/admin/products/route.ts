@@ -14,6 +14,7 @@ export async function GET() {
             discountPercent: true,
             mallName: true,
             affiliateLink: true,
+            imageUrl: true,
             createdAt: true,
         },
     });
