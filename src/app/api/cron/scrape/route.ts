@@ -25,6 +25,21 @@ const SHOP_DOMAINS = [
 
 const isShopLink = (url: string) => SHOP_DOMAINS.some(d => url.includes(d));
 
+// 쿠팡 URL을 파트너스 어필리에이트 링크로 변환
+function toCoupangAffiliateLink(url: string): string {
+    const COUPANG_PARTNERS_ID = process.env.COUPANG_PARTNERS_ID || "";
+    if (!COUPANG_PARTNERS_ID) return url;
+    if (!url.includes("coupang.com")) return url;
+    if (url.includes("link.coupang.com")) return url; // 이미 어필리에이트 링크
+    try {
+        const u = new URL(url);
+        u.searchParams.set("partnerCode", COUPANG_PARTNERS_ID);
+        return u.toString();
+    } catch {
+        return url;
+    }
+}
+
 type RawDeal = { title: string; link: string; mallName: string; source: string };
 
 // ─── 쇼핑몰 링크 추출 ────────────────────────────────────────
@@ -332,6 +347,8 @@ IT 맞으면:
                 const shopLink = await fetchShopLink(deal.link, `https://${new URL(deal.link).hostname}/`);
                 affiliateLink = shopLink || deal.link;
             }
+            // 쿠팡 링크면 파트너스 ID 적용
+            affiliateLink = toCoupangAffiliateLink(affiliateLink);
 
             const originalPrice = Number(aiData.originalPrice) || 0;
             const salePrice = Number(aiData.salePrice) || 0;
