@@ -318,6 +318,12 @@ export async function GET() {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
     try {
+        // ── 1. 만료 딜 자동 삭제 (3일 이상 된 핫딜) ─────────────
+        const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+        const expired = await prisma.product.deleteMany({
+            where: { createdAt: { lt: threeDaysAgo } },
+        });
+
         const [clienDeals, ppomppuDeals, quasarDeals, naverDeals] = await Promise.all([
             scrapeClien(),
             scrapePpomppu(),
@@ -411,6 +417,18 @@ export async function GET() {
 
             const originalPrice = Number(aiData.originalPrice) || 0;
             const salePrice = Number(aiData.salePrice) || 0;
+
+            // ── 2. 가격 이상 감지 ─────────────────────────────────
+            // 할인가 > 정가: AI가 원가/할인가를 반대로 파악한 경우
+            if (originalPrice > 0 && salePrice > 0 && salePrice > originalPrice) continue;
+            // 비정상적으로 낮은 가격: 1원·100원 등 오류값 (IT 제품은 최소 5,000원 이상)
+            if (salePrice > 0 && salePrice < 5000) continue;
+            // 비현실적 할인율: 97% 이상이면 가격 파싱 오류로 간주
+            if (originalPrice > 0 && salePrice > 0) {
+                const calcDiscount = Math.round(((originalPrice - salePrice) / originalPrice) * 100);
+                if (calcDiscount > 96) continue;
+            }
+
             const discountPercent = originalPrice > 0 && salePrice > 0 && originalPrice > salePrice
                 ? Math.round(((originalPrice - salePrice) / originalPrice) * 100)
                 : 0;
@@ -439,7 +457,12 @@ export async function GET() {
             results.push(`[${deal.source}] ${newProduct.title}`);
         }
 
-        return NextResponse.json({ success: true, added: results, sourceStats });
+        return NextResponse.json({
+            success: true,
+            added: results,
+            sourceStats,
+            expired: expired.count,
+        });
     } catch (error: any) {
         console.error("Scrape Error:", error);
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });

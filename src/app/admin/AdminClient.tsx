@@ -31,7 +31,8 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
             const data = await res.json();
             if (data.success) {
                 const added = data.added as string[];
-                setScrapeResult(added.length > 0 ? `✅ ${added.length}개 추가됨: ${added.join(", ")}` : "✅ 새로운 IT 핫딜 없음 (이미 등록됨)");
+                const expiredMsg = data.expired > 0 ? ` / 만료 ${data.expired}개 삭제` : "";
+                setScrapeResult(added.length > 0 ? `✅ ${added.length}개 추가됨: ${added.join(", ")}${expiredMsg}` : `✅ 새로운 IT 핫딜 없음${expiredMsg}`);
                 setScrapeStatus("done");
                 // 목록 새로고침
                 const r2 = await fetch("/api/admin/products");
