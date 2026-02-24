@@ -14,10 +14,32 @@ async function getProductById(id: string) {
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
     const { slug: id } = await params;
     const p = await getProductById(id);
-    if (!p) return { title: "핫딜을 찾을 수 없습니다 - IT핫딜랩" };
+    if (!p) return { title: "핫딜을 찾을 수 없습니다" };
+
+    const title = `${p.title} - ${p.discountPercent > 0 ? `${p.discountPercent}% 할인` : "핫딜"}`;
+    const description = p.discountPercent > 0
+        ? `${p.discountPercent}% 할인 ${p.salePrice.toLocaleString()}원! ${p.aiSummary}`
+        : p.aiSummary;
+    const url = `https://ithotdealab.com/deal/${p.id}`;
+
     return {
-        title: `${p.title} - IT핫딜랩`,
-        description: `${p.discountPercent}% 할인! ${p.aiSummary}`,
+        title,
+        description,
+        openGraph: {
+            type: "article",
+            url,
+            title,
+            description,
+            images: p.imageUrl ? [{ url: p.imageUrl, width: 800, height: 600, alt: p.title }] : [],
+            siteName: "IT핫딜랩",
+            locale: "ko_KR",
+        },
+        twitter: {
+            card: p.imageUrl ? "summary_large_image" : "summary",
+            title,
+            description,
+            images: p.imageUrl ? [p.imageUrl] : [],
+        },
     };
 }
 
