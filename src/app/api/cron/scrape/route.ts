@@ -130,6 +130,24 @@ async function fetchShopImage(shopUrl: string): Promise<string | null> {
     }
 }
 
+// ─── 텔레그램 알림 ───────────────────────────────────────────
+async function sendTelegramAlert(newDeals: string[]) {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
+    if (!token || !chatId || newDeals.length === 0) return;
+
+    const lines = newDeals.map(d => `• ${d}`).join("\n");
+    const text = `⚡ IT핫딜랩 새 딜 등록!\n\n📦 ${newDeals.length}개의 새 핫딜이 등록됐습니다.\n\n${lines}\n\n🔗 https://ithotdealab.com`;
+
+    try {
+        await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+            chat_id: chatId,
+            text,
+            parse_mode: "HTML",
+        });
+    } catch { /* 알림 실패는 무시 */ }
+}
+
 // ─── URL-safe slug 생성 ──────────────────────────────────────
 function generateSlug(title: string): string {
     const ascii = title
@@ -456,6 +474,9 @@ export async function GET() {
             });
             results.push(`[${deal.source}] ${newProduct.title}`);
         }
+
+        // 새 딜이 있으면 텔레그램 알림 전송
+        await sendTelegramAlert(results);
 
         return NextResponse.json({
             success: true,
