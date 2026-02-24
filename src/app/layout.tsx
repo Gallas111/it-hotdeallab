@@ -7,6 +7,9 @@ import "./globals.css";
 export const metadata = {
   title: "IT핫딜랩 - 실시간 IT/가전 핫딜 모음",
   description: "클리앙, 뽐뿌, 퀘이사존의 IT·가전 핫딜을 AI로 분석해 한곳에서 모아봅니다.",
+  verification: {
+    google: "BPEPStceyj8JVwc0yyAvoJa2im--ULbmuajiSz7CYSo",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
