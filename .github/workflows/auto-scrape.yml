@@ -1,0 +1,20 @@
+name: 핫딜 자동 수집
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'   # 매 2시간마다 자동 실행 (UTC 기준, KST +9)
+  workflow_dispatch:          # GitHub에서 수동 실행 버튼도 제공
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 클리앙 IT 핫딜 수집
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" "https://hotdeal-tau.vercel.app/api/cron/scrape")
+          echo "HTTP Status: $response"
+          if [ "$response" != "200" ]; then
+            echo "❌ 수집 실패 (status: $response)"
+            exit 1
+          fi
+          echo "✅ 수집 완료"
