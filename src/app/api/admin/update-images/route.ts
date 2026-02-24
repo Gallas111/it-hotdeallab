@@ -19,9 +19,14 @@ const SHOP_DOMAINS = [
     "ssg.com", "lotteon.com", "danawa.com",
     "amazon.com", "amazon.co.jp", "aliexpress.com",
     "tmon.co.kr", "smartstore.naver.com", "brand.naver.com",
+    "lotteimall.com",
 ];
 
+// 핫링크 차단으로 액박 뜨는 커뮤니티 도메인들
+const BROKEN_IMAGE_DOMAINS = ["clien.net", "ppomppu.co.kr"];
+
 const isShopLink = (url: string) => SHOP_DOMAINS.some(d => url.includes(d));
+const isBrokenImageDomain = (url: string) => BROKEN_IMAGE_DOMAINS.some(d => url.includes(d));
 
 function normalizeImgUrl(url: string | undefined, baseUrl: string): string | null {
     if (!url) return null;
@@ -35,8 +40,7 @@ function normalizeImgUrl(url: string | undefined, baseUrl: string): string | nul
     return null;
 }
 
-// 쇼핑몰 상품 페이지에서 og:image 추출
-// 커뮤니티 사이트 이미지는 핫링크 차단되어 사용 불가 → 쇼핑몰만 사용
+// 쇼핑몰 상품 페이지 og:image 추출
 async function fetchShopImage(shopUrl: string): Promise<string | null> {
     try {
         const { data: html } = await axios.get(shopUrl, {
@@ -54,26 +58,80 @@ async function fetchShopImage(shopUrl: string): Promise<string | null> {
     }
 }
 
+// 커뮤니티 포스트에서 쇼핑몰 링크 추출
+async function fetchShopLink(postUrl: string): Promise<string | null> {
+    try {
+        const referer = `https://${new URL(postUrl).hostname}/`;
+        const { data: html } = await axios.get(postUrl, {
+            headers: { ...HEADERS, Referer: referer },
+            timeout: 10000,
+        });
+        const $ = cheerio.load(html);
+        let found: string | null = null;
+
+        $(".post_content, .post-content, .view-content, .cont, .fr-view, .board_view, article").find("a[href]").each((_, el) => {
+            if (found) return;
+            const href = $(el).attr("href") || "";
+            if (href.startsWith("http") && isShopLink(href)) found = href;
+        });
+
+        if (!found) {
+            $("a[href]").each((_, el) => {
+                if (found) return;
+                const href = $(el).attr("href") || "";
+                if (href.startsWith("http") && isShopLink(href)) found = href;
+            });
+        }
+
+        return found;
+    } catch {
+        return null;
+    }
+}
+
 export async function POST() {
     try {
-        // imageUrl이 없는 상품 중 affiliateLink가 실제 쇼핑몰인 것만 처리
+        // Step 1: 핫링크 차단 도메인의 imageUrl을 null로 초기화
+        let cleared = 0;
+        for (const domain of BROKEN_IMAGE_DOMAINS) {
+            const result = await prisma.product.updateMany({
+                where: { imageUrl: { contains: domain } },
+                data: { imageUrl: null },
+            });
+            cleared += result.count;
+        }
+
+        // Step 2: imageUrl이 없는 상품 처리 (최대 30개)
         const products = await prisma.product.findMany({
             where: { imageUrl: null },
-            select: { id: true, affiliateLink: true },
+            select: { id: true, sourceUrl: true, affiliateLink: true },
             take: 30,
         });
 
         let updated = 0;
-        let skipped = 0;
 
         for (const p of products) {
-            // 커뮤니티 링크면 스킵 (이미지 핫링크 차단)
-            if (!isShopLink(p.affiliateLink)) {
-                skipped++;
-                continue;
-            }
             try {
-                const imageUrl = await fetchShopImage(p.affiliateLink);
+                let imageUrl: string | null = null;
+
+                if (isShopLink(p.affiliateLink)) {
+                    // 이미 쇼핑몰 링크 → 상품 페이지에서 바로 이미지 추출
+                    imageUrl = await fetchShopImage(p.affiliateLink);
+                } else {
+                    // 커뮤니티 링크 → 원본 포스트에서 쇼핑몰 링크 찾은 후 이미지 추출
+                    const shopLink = await fetchShopLink(p.sourceUrl);
+                    if (shopLink) {
+                        imageUrl = await fetchShopImage(shopLink);
+                        // 쇼핑몰 링크도 함께 업데이트
+                        if (shopLink) {
+                            await prisma.product.update({
+                                where: { id: p.id },
+                                data: { affiliateLink: shopLink },
+                            });
+                        }
+                    }
+                }
+
                 if (imageUrl) {
                     await prisma.product.update({
                         where: { id: p.id },
@@ -86,9 +144,10 @@ export async function POST() {
 
         return NextResponse.json({
             success: true,
+            cleared,
             total: products.length,
             updated,
-            skipped,
+            message: `${cleared}개 깨진 이미지 초기화 → ${products.length}개 처리 → ${updated}개 업데이트 완료`,
         });
     } catch (error: any) {
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });

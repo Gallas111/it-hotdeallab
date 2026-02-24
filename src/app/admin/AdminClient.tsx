@@ -69,7 +69,7 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
             const res = await fetch("/api/admin/update-images", { method: "POST" });
             const data = await res.json();
             if (data.success) {
-                setImageUpdateResult(`✅ ${data.total}개 중 ${data.updated}개 이미지 업데이트 완료`);
+                setImageUpdateResult(`✅ ${data.message || `${data.total}개 중 ${data.updated}개 업데이트 완료`}`);
                 setImageUpdateStatus("done");
                 const r = await fetch("/api/admin/products");
                 const newList = await r.json();
@@ -91,8 +91,11 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
         setProducts(prev => prev.filter(p => p.id !== id));
     };
 
+    const BROKEN_IMG_DOMAINS = ["clien.net", "ppomppu.co.kr"];
     const clienCount = products.filter(p => p.affiliateLink.includes("clien.net")).length;
-    const noImageCount = products.filter(p => !p.imageUrl).length;
+    const noImageCount = products.filter(p =>
+        !p.imageUrl || BROKEN_IMG_DOMAINS.some(d => p.imageUrl!.includes(d))
+    ).length;
 
     return (
         <div className="mx-auto max-w-5xl px-4 py-12 space-y-10">
@@ -180,12 +183,17 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
                     {products.map(p => (
                         <div key={p.id} className="flex items-center gap-3 rounded-xl border border-gray-100 p-3 dark:border-white/5">
                             {/* 이미지 썸네일 */}
-                            <div style={{ width: 40, height: 40, borderRadius: 8, overflow: "hidden", flexShrink: 0, background: "var(--surface2)", border: "1px solid var(--border)" }}>
-                                {p.imageUrl
-                                    ? <img src={p.imageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                                    : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🖼</div>
-                                }
-                            </div>
+                            {(() => {
+                                const isBroken = p.imageUrl && BROKEN_IMG_DOMAINS.some(d => p.imageUrl!.includes(d));
+                                return (
+                                    <div style={{ width: 40, height: 40, borderRadius: 8, overflow: "hidden", flexShrink: 0, background: "var(--surface2)", border: `1px solid ${isBroken ? "#f87171" : "var(--border)"}` }}>
+                                        {p.imageUrl && !isBroken
+                                            ? <img src={p.imageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                            : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>{isBroken ? "🚫" : "🖼"}</div>
+                                        }
+                                    </div>
+                                );
+                            })()}
                             <div className="flex-1 min-w-0">
                                 <p className="text-[14px] font-bold text-[var(--foreground)] truncate">{p.title}</p>
                                 <div className="flex items-center gap-2 mt-0.5">
