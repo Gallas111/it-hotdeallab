@@ -472,7 +472,7 @@ export async function GET() {
                     isActive: true,
                 },
             });
-            results.push(`[${deal.source}] ${newProduct.title}`);
+            results.push(`[${deal.source}] ${newProduct.title} | https://ithotdealab.com/deal/${newProduct.id}`);
         }
 
         // 새 딜이 있으면 텔레그램 알림 전송
