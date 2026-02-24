@@ -2,31 +2,20 @@ import { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
 import { notFound } from "next/navigation";
+import { prisma } from "@/lib/prisma";
 
-// Mock data fetcher
-const getProductBySlug = (slug: string) => {
-    return {
-        title: "LG전자 27인치 4K UHD 모니터 27UP850N IPS HDR400",
-        slug: slug,
-        imageUrl: null,
-        originalPrice: 620000,
-        salePrice: 449000,
-        discountPercent: 28,
-        mallName: "쿠팡",
-        category: "모니터/주변기기",
-        aiSummary: "현재 주요 오픈마켓 중 최저가이며, 이전 역대급 할인가에 근접한 가격입니다. 사무용 및 영상 편집용 4K 모니터를 찾으신다면 최고의 선택입니다.",
-        aiPros: "4K 고해상도 IPS 패널, USB-C PD 90W 지원, 정확한 색표현력",
-        aiTarget: "가성비 4K 모니터가 필요한 재택근무자, 맥북 사용자",
-        seoContent: "LG 전자 27UP850N 모니터는 27인치 화면 크기에 4K UHD 해상도를 지원하는 고성능 모니터입니다. IPS 패널을 탑재하여 상하좌우 178도의 넓은 시야각을 자랑하며, HDR400 인증을 통해 더욱 선명하고 생동감 넘치는 화면을 제공합니다. 특히 USB-C 단자를 통해 모니터 연결과 동시에 노트북 충전(최대 90W)이 가능하여 맥북이나 최신 노트북 사용자에게 매우 편리합니다.",
-        affiliateLink: "https://link.coupang.com/a/example",
-        sourceUrl: "https://www.coupang.com/vp/products/...",
-        createdAt: new Date(),
-    };
-};
+export const dynamic = "force-dynamic";
+
+async function getProductBySlug(slug: string) {
+    return prisma.product.findUnique({
+        where: { slug },
+    });
+}
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
     const resolvedParams = await params;
-    const product = getProductBySlug(resolvedParams.slug);
+    const product = await getProductBySlug(resolvedParams.slug);
+    if (!product) return { title: "핫딜을 찾을 수 없습니다 - IT핫딜랩" };
     return {
         title: `${product.title} - IT핫딜랩`,
         description: `${product.discountPercent}% 할인! ${product.aiSummary}`,
@@ -35,10 +24,19 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
 export default async function DealDetail({ params }: { params: Promise<{ slug: string }> }) {
     const resolvedParams = await params;
-    const product = getProductBySlug(resolvedParams.slug);
+    const product = await getProductBySlug(resolvedParams.slug);
     if (!product) notFound();
 
     const pros = product.aiPros.split(",").map(p => p.trim());
+
+    const timeAgo = (() => {
+        const diff = Date.now() - new Date(product.createdAt).getTime();
+        const minutes = Math.floor(diff / 60000);
+        if (minutes < 60) return `${minutes}분 전`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours}시간 전`;
+        return `${Math.floor(hours / 24)}일 전`;
+    })();
 
     return (
         <div className="detail-layout pb-32">
@@ -70,7 +68,7 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
                     <div className="flex items-center gap-3 text-[13px] text-gray-400 font-medium">
                         <span>온라인 최저가</span>
                         <span className="h-1 w-1 rounded-full bg-gray-300"></span>
-                        <span>12분 전 등록</span>
+                        <span>{timeAgo} 등록</span>
                     </div>
                     <div className="flex gap-4">
                         <Link href={product.sourceUrl} target="_blank" className="meta-link text-[var(--primary)] font-bold text-sm">📝 원본글</Link>
@@ -131,7 +129,7 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
                     {/* Summary */}
                     <div className="rounded-2xl bg-gray-50 p-8 dark:bg-white/5">
                         <p className="text-xl font-bold leading-[1.8] text-gray-800 dark:text-gray-200">
-                            "{product.aiSummary}"
+                            &ldquo;{product.aiSummary}&rdquo;
                         </p>
                     </div>
 
@@ -170,7 +168,7 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
                     <span className="h-1.5 w-1.5 rounded-full bg-gray-300"></span>
                     심층 분석 가이드
                 </h3>
-                <div className="prose prose-sm max-w-none px-2 text-[17px] leading-[1.95] text-gray-600 dark:text-gray-400 font-medium">
+                <div className="prose prose-sm max-w-none px-2 text-[17px] leading-[1.95] text-gray-600 dark:text-gray-400 font-medium whitespace-pre-line">
                     {product.seoContent}
                 </div>
             </section>
