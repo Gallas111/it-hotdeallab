@@ -351,10 +351,21 @@ export async function GET() {
                     messages: [
                         {
                             role: "system",
-                            content: `IT/가전 핫딜 큐레이터. 제목 보고 판별 후 JSON으로만 응답.
-IT 아니면: {"isIT":false}
-IT 맞으면:
-{"isIT":true,"refinedTitle":"매력적 제목(50자이내)","category":"Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기 중 하나","originalPrice":숫자,"salePrice":숫자,"aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"500자이상 상세설명"}`,
+                            content: `IT/가전 핫딜 전문 큐레이터. 아래 두 조건을 모두 충족해야만 등록.
+
+[등록 조건 - 반드시 둘 다 충족]
+1. IT/전자기기/가전 제품 (노트북, 스마트폰, 모니터, 이어폰, 키보드 등 하드웨어)
+2. 실질적 가격 혜택 존재: 정가 대비 할인, 기간한정 특가, 역대최저가, 쿠폰/카드 할인가 등
+
+[제외 항목 - 하나라도 해당하면 false]
+- 단순 제품 소개·리뷰·추천글 (할인 없음)
+- 정가 그대로 판매
+- 소프트웨어·게임·구독 서비스 (하드웨어만 허용)
+- 중고/리퍼라도 특별 할인이 없으면 제외
+
+조건 미충족: {"isIT":false}
+조건 충족 시:
+{"isIT":true,"refinedTitle":"가격 혜택 강조 제목(50자이내)","category":"Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄(예:20%할인/역대최저/오늘만특가)","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"500자이상 상세설명"}`,
                         },
                         { role: "user", content: `출처:${deal.source} 제목:${deal.title}` },
                     ],
@@ -367,6 +378,13 @@ IT 맞으면:
             }
 
             if (!aiData.isIT) continue;
+
+            // ── 할인 정보 검증 ────────────────────────────────────
+            // 가격 정보도 없고 할인 설명도 없으면 정가 판매 → 제외
+            const _origCheck = Number(aiData.originalPrice) || 0;
+            const _saleCheck = Number(aiData.salePrice) || 0;
+            const _hasDiscount = _origCheck > 0 || _saleCheck > 0 || !!aiData.discountInfo;
+            if (!_hasDiscount) continue;
 
             // ── 이미지 + 쇼핑몰 링크 처리 ────────────────────────
             const referer = `https://${new URL(deal.link).hostname}/`;
@@ -408,7 +426,9 @@ IT 맞으면:
                     category: aiData.category || "기타",
                     mallName: deal.mallName,
                     sourceUrl: deal.link,
-                    aiSummary: aiData.aiSummary || "",
+                    aiSummary: aiData.discountInfo
+                        ? `[${aiData.discountInfo}] ${aiData.aiSummary || ""}`.trim()
+                        : aiData.aiSummary || "",
                     aiPros: aiData.aiPros || "",
                     aiTarget: aiData.aiTarget || "",
                     seoContent: aiData.seoContent || "",
