@@ -31,7 +31,7 @@ export default function DealCard({ product }: DealCardProps) {
     const formattedOriginalPrice = product.originalPrice.toLocaleString();
 
     return (
-        <Link href={`/deal/${product.slug}`} className="deal-row group !border-none !bg-transparent !p-0">
+        <Link href={`/deal/${product.id}`} className="deal-row group !border-none !bg-transparent !p-0">
             <div className="flex w-full gap-5 rounded-[24px] bg-white p-4 transition-all duration-300 hover:shadow-xl hover:shadow-black/5 dark:bg-[#1c1c1e] dark:hover:bg-white/5 premium-shadow">
                 {/* Thumbnail */}
                 <div className="image-box h-[110px] w-[110px] shrink-0 p-2 sm:h-[120px] sm:w-[120px]">
