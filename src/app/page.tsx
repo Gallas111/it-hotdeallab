@@ -1,6 +1,5 @@
 import DealCard from "@/components/DealCard";
 import { prisma } from "@/lib/prisma";
-import { Suspense } from "react";
 
 export const dynamic = "force-dynamic";
 
@@ -9,58 +8,63 @@ export default async function Home({
 }: {
   searchParams: Promise<{ category?: string }>;
 }) {
-  const resolvedParams = await searchParams;
-  const category = resolvedParams.category;
+  const { category } = await searchParams;
 
-  // 실제 DB에서 데이터 가져오기 (최신순 20개)
   const deals = await prisma.product.findMany({
     where: {
       isActive: true,
       ...(category && category !== "전체" ? { category } : {}),
     },
-    orderBy: {
-      createdAt: "desc",
-    },
-    take: 20,
+    orderBy: { createdAt: "desc" },
+    take: 40,
   });
 
   return (
-    <div className="flex flex-col gap-10">
-      <div className="flex items-center justify-between border-b border-gray-100 pb-6 dark:border-white/5">
-        <h2 className="text-xl font-black text-[var(--foreground)] tracking-tight flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-[var(--primary)]"></span>
-          실시간 인기 핫딜
-        </h2>
-        <div className="flex gap-2">
-          <button className="text-[12px] font-bold text-gray-400 hover:text-[var(--primary)] transition-colors">최신순</button>
-          <span className="text-[12px] text-gray-200">|</span>
-          <button className="text-[12px] font-bold text-gray-400 hover:text-[var(--primary)] transition-colors">인기순</button>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+      {/* 섹션 헤더 */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{
+            width: 8, height: 8, borderRadius: "50%",
+            background: "var(--primary)",
+            display: "inline-block",
+            boxShadow: "0 0 0 3px rgba(255,59,48,0.2)",
+          }} />
+          <h2 style={{ fontSize: 15, fontWeight: 800, color: "var(--foreground)", letterSpacing: "-0.02em" }}>
+            {category && category !== "전체" ? `${category} 핫딜` : "실시간 IT 핫딜"}
+          </h2>
+          {deals.length > 0 && (
+            <span className="badge badge-gray">{deals.length}개</span>
+          )}
         </div>
+        <span style={{ fontSize: 12, color: "var(--muted)" }}>최신순</span>
       </div>
 
-      <div className="grid gap-6 sm:grid-cols-1 lg:grid-cols-2">
-        {deals.length > 0 ? (
-          deals.map((deal) => (
+      {/* 딜 리스트 */}
+      {deals.length > 0 ? (
+        <div className="card" style={{ overflow: "hidden" }}>
+          {deals.map(deal => (
             <DealCard key={deal.id} product={deal} />
-          ))
-        ) : (
-          <div className="flex h-64 flex-col items-center justify-center text-gray-400 col-span-full">
-            <span className="text-4xl mb-4">🔍</span>
-            <p className="text-sm font-bold">현재 등록된 핫딜이 없습니다.</p>
-          </div>
-        )}
-      </div>
-
-      {/* Footer Meta */}
-      <div className="py-20 text-center">
-        <div className="inline-flex flex-col items-center gap-4">
-          <div className="h-[1px] w-12 bg-gray-100 dark:bg-white/5"></div>
-          <p className="text-[10px] font-black text-gray-300 uppercase tracking-[0.3em]">
-            IT HOTDEAL LAB CURATION
-          </p>
-          <div className="h-[1px] w-12 bg-gray-100 dark:bg-white/5"></div>
+          ))}
         </div>
-      </div>
+      ) : (
+        <div className="card" style={{
+          padding: "60px 20px", textAlign: "center",
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 12,
+        }}>
+          <span style={{ fontSize: 40 }}>🔍</span>
+          <p style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)" }}>
+            등록된 핫딜이 없습니다
+          </p>
+          <p style={{ fontSize: 13, color: "var(--muted)" }}>
+            <a href="/admin" style={{ color: "var(--primary)", fontWeight: 700, textDecoration: "none" }}>
+              관리 페이지
+            </a>
+            에서 크롤링을 실행해보세요
+          </p>
+        </div>
+      )}
     </div>
   );
 }

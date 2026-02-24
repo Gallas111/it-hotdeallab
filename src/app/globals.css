@@ -1,191 +1,198 @@
 @import "tailwindcss";
 
 :root {
-  /* Colors - Clean Community Palette */
-  --background: #f8f9fb;
-  --foreground: #1d1d1f;
-  --muted: #f1f3f5;
-  --border: #eaeaea;
-
-  /* Action Colors */
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --surface2: #f9fafb;
+  --foreground: #111111;
+  --muted: #6b7280;
+  --border: #e5e7eb;
   --primary: #ff3b30;
-  /* Apple Red */
-  --secondary: #007aff;
-  --accent: #ff9500;
-
-  --font-sans: "Inter", "Pretendard", system-ui, -apple-system, sans-serif;
-  --card-bg: #ffffff;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-muted: var(--muted);
-  --color-border: var(--border);
-  --color-primary: var(--primary);
-  --color-secondary: var(--secondary);
-  --color-accent: var(--accent);
+  --primary-soft: #fff1f0;
+  --blue: #2563eb;
+  --blue-soft: #eff6ff;
+  --green: #16a34a;
+  --green-soft: #f0fdf4;
+  --font-sans: "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --radius: 10px;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #121212;
-    --foreground: #f5f5f7;
-    --muted: #1c1c1e;
-    --border: #2c2c2e;
-    --card-bg: #1c1c1e;
+    --bg: #0f1117;
+    --surface: #1a1d24;
+    --surface2: #22252e;
+    --foreground: #f0f2f5;
+    --muted: #8b92a0;
+    --border: #2d3140;
+    --primary-soft: rgba(255,59,48,0.12);
+    --blue-soft: rgba(37,99,235,0.12);
+    --green-soft: rgba(22,163,74,0.12);
   }
 }
 
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
-}
+* { box-sizing: border-box; padding: 0; margin: 0; }
 
 body {
-  background: var(--background);
+  background: var(--bg);
   color: var(--foreground);
   font-family: var(--font-sans);
-  line-height: 1.6;
-  letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
+  line-height: 1.5;
 }
 
-/* Layout Container System (V3) */
-.global-container {
-  @apply mx-auto w-full max-w-[1200px];
+/* ── 레이아웃 ───────────────────────────── */
+.site-wrap {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
-.main-layout {
-  @apply mx-auto flex w-full max-w-[1200px] flex-col bg-white dark:bg-[#121212];
-  padding-left: 24px;
-  padding-right: 24px;
+.site-body {
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 16px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
-@media (max-width: 640px) {
-  .main-layout {
-    padding-left: 16px;
-    padding-right: 16px;
-  }
+/* ── 카드 ───────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
 }
 
-.detail-layout {
-  @apply mx-auto w-full max-w-[1200px] py-8 flex flex-col gap-8;
+/* ── 딜 리스트 아이템 ───────────────────── */
+.deal-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
 }
+.deal-item:first-child { border-radius: var(--radius) var(--radius) 0 0; }
+.deal-item:last-child { border-bottom: none; border-radius: 0 0 var(--radius) var(--radius); }
+.deal-item:only-child { border-radius: var(--radius); }
+.deal-item:hover { background: var(--surface2); }
 
-.content-container {
-  @apply mx-auto w-full max-w-[920px] flex flex-col gap-8;
+/* ── 뱃지 ───────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.6;
+  white-space: nowrap;
 }
+.badge-red   { background: var(--primary-soft); color: var(--primary); }
+.badge-blue  { background: var(--blue-soft);    color: var(--blue); }
+.badge-gray  { background: var(--surface2);     color: var(--muted); border: 1px solid var(--border); }
+.badge-green { background: var(--green-soft);   color: var(--green); }
 
-/* Premium Card & Shadow System */
-.card-section {
-  @apply rounded-3xl bg-white p-8 transition-all duration-300 dark:bg-[#1c1c1e];
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
-}
-
-.premium-shadow {
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.04);
-}
-
-.dark .premium-shadow {
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
-}
-
-/* Image Container */
-.image-box {
-  @apply relative overflow-hidden rounded-2xl bg-[#f5f6f8] dark:bg-white/5 border border-[var(--border)];
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.02);
-}
-
-/* List Item Row Style */
-.deal-row {
-  @apply flex gap-4 border-b border-[var(--border)] bg-[var(--card-bg)] p-4 transition-colors hover:bg-gray-50 dark:hover:bg-white/5 relative;
-}
-
-/* Pill Tabs & Sliding System */
-.tab-pill {
-  @apply relative z-10 rounded-full px-5 py-2 text-[14px] font-bold transition-all whitespace-nowrap active:scale-95;
-}
-
-.tab-pill-active {
-  @apply text-white;
-}
-
-.tab-pill-inactive {
-  @apply text-gray-500 hover:text-gray-800 dark:hover:text-gray-200;
-}
-
-/* Typography & Elements */
-.title-text {
-  @apply text-[17px] font-bold leading-snug tracking-tight text-[var(--foreground)] line-clamp-2 mb-1;
-}
-
-.price-accent {
-  @apply text-lg font-extrabold text-[var(--primary)];
-}
-
-.price-original {
-  @apply text-xs text-gray-400 line-through ml-1;
-}
-
-.discount-badge {
-  @apply text-sm font-black text-[var(--primary)] ml-1;
-}
-
-.meta-info {
-  @apply text-[12px] text-gray-400 font-medium;
-}
-
-.mall-tag {
-  @apply rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-bold text-gray-600 dark:bg-gray-800 dark:text-gray-400;
-}
-
-.category-tag {
-  @apply rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-bold text-[var(--primary)] dark:bg-red-950/30;
-}
-
-.meta-link {
-  @apply flex items-center gap-1 text-[13px] font-medium text-gray-400 hover:text-gray-600 transition-colors;
-}
-
-/* CTA Styles */
-.btn-cta {
-  @apply flex w-full items-center justify-center rounded-[14px] bg-gradient-to-b from-[var(--primary)] to-[#e63226] py-5 text-[19px] font-extrabold text-white transition-all active:scale-[0.97] hover:brightness-105 shadow-lg shadow-red-500/10;
-}
-
-/* Glassmorphism & UI Utils */
-.glass-input {
-  @apply bg-gray-100/50 backdrop-blur-md border border-transparent w-48;
-  transition: all 500ms cubic-bezier(0.23, 1, 0.32, 1);
-}
-
-.glass-input:focus {
-  @apply bg-white/80 border-[var(--primary)] w-64;
-  box-shadow: 0 0 20px rgba(255, 59, 48, 0.15);
-}
-
-.dark .glass-input {
-  @apply bg-white/5;
-}
-
-.dark .glass-input:focus {
-  @apply bg-white/10;
-}
-
-/* Tab Animation Indicator */
-.tab-indicator {
-  @apply absolute bottom-0 left-0 h-full bg-[var(--primary)] rounded-full -z-10;
-  transition: all 500ms cubic-bezier(0.23, 1, 0.32, 1);
-}
-
-/* Utils */
-.scrollbar-none::-webkit-scrollbar {
-  display: none;
-}
-
-.scrollbar-none {
-  -ms-overflow-style: none;
+/* ── 탭 ─────────────────────────────────── */
+.tab-bar {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
   scrollbar-width: none;
+  padding: 2px 0;
+}
+.tab-bar::-webkit-scrollbar { display: none; }
+
+.tab-btn {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: transparent;
+  color: var(--muted);
+}
+.tab-btn:hover { color: var(--foreground); background: var(--surface2); }
+.tab-btn.active { background: var(--primary); color: #fff; }
+
+/* ── CTA 버튼 ───────────────────────────── */
+.btn-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 14px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 800;
+  border-radius: var(--radius);
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  text-decoration: none;
+}
+.btn-primary:hover { opacity: 0.9; }
+.btn-primary:active { transform: scale(0.98); }
+
+/* ── 입력 ───────────────────────────────── */
+.search-input {
+  height: 36px;
+  padding: 0 36px 0 14px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  font-size: 13px;
+  font-family: var(--font-sans);
+  color: var(--foreground);
+  outline: none;
+  width: 200px;
+  transition: all 0.2s;
+}
+.search-input:focus {
+  width: 240px;
+  border-color: var(--primary);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px rgba(255,59,48,0.1);
+}
+.search-input::placeholder { color: var(--muted); }
+
+/* ── 상세 페이지 ────────────────────────── */
+.detail-wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 20px 0 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.detail-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── 유틸 ───────────────────────────────── */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }

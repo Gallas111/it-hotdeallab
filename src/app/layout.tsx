@@ -6,31 +6,27 @@ import "./globals.css";
 
 export const metadata = {
   title: "IT핫딜랩 - 실시간 IT/가전 핫딜 모음",
-  description: "실시간으로 분석하고 검증하는 IT, 노트북, 모니터 최저가 핫딜 플랫폼. IT핫딜랩.",
+  description: "클리앙, 뽐뿌, 퀘이사존의 IT·가전 핫딜을 AI로 분석해 한곳에서 모아봅니다.",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ko">
       <head>
         <link
           rel="stylesheet"
-          as="style"
-          crossOrigin=""
           href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"
         />
       </head>
-      <body className="flex min-h-screen justify-center bg-[var(--background)]">
-        <div className="main-layout premium-shadow">
-          <Header />
-          <Suspense fallback={null}>
-            <CategoryFilter />
-          </Suspense>
-          <main className="flex-1 py-8">{children}</main>
+      <body className="site-wrap">
+        <Header />
+        <Suspense fallback={null}>
+          <CategoryFilter />
+        </Suspense>
+        <div className="site-body">
+          <main style={{ flex: 1, paddingTop: 20, paddingBottom: 40 }}>
+            {children}
+          </main>
           <Footer />
         </div>
       </body>
