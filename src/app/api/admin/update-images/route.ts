@@ -58,6 +58,30 @@ async function fetchShopImage(shopUrl: string): Promise<string | null> {
     }
 }
 
+// 네이버 쇼핑 API로 상품명 검색 → 이미지 (최후 폴백)
+// CDN 이미지라 핫링크 없음, 가장 안정적
+async function searchNaverImage(title: string): Promise<string | null> {
+    const clientId = process.env.NAVER_CLIENT_ID;
+    const clientSecret = process.env.NAVER_CLIENT_SECRET;
+    if (!clientId || !clientSecret) return null;
+    try {
+        // 가격/퍼센트 정보 제거 후 핵심 상품명만 검색
+        const query = title.replace(/\d[\d,]*원|\d+%|특가|할인|최저가|정품/g, "").trim().substring(0, 40);
+        const { data } = await axios.get("https://openapi.naver.com/v1/search/shop.json", {
+            params: { query, display: 1, sort: "sim" },
+            headers: {
+                "X-Naver-Client-Id": clientId,
+                "X-Naver-Client-Secret": clientSecret,
+            },
+            timeout: 5000,
+        });
+        const img = data.items?.[0]?.image;
+        return normalizeImgUrl(img, "https://shopping.naver.com");
+    } catch {
+        return null;
+    }
+}
+
 // 커뮤니티 포스트에서 쇼핑몰 링크 추출
 async function fetchShopLink(postUrl: string): Promise<string | null> {
     try {
@@ -104,7 +128,7 @@ export async function POST() {
         // Step 2: imageUrl이 없는 상품 처리 (최대 30개)
         const products = await prisma.product.findMany({
             where: { imageUrl: null },
-            select: { id: true, sourceUrl: true, affiliateLink: true },
+            select: { id: true, title: true, sourceUrl: true, affiliateLink: true },
             take: 30,
         });
 
@@ -115,21 +139,24 @@ export async function POST() {
                 let imageUrl: string | null = null;
 
                 if (isShopLink(p.affiliateLink)) {
-                    // 이미 쇼핑몰 링크 → 상품 페이지에서 바로 이미지 추출
+                    // 1차: 쇼핑몰 상품 페이지 og:image
                     imageUrl = await fetchShopImage(p.affiliateLink);
                 } else {
-                    // 커뮤니티 링크 → 원본 포스트에서 쇼핑몰 링크 찾은 후 이미지 추출
+                    // 1차: 커뮤니티 원본 포스트에서 쇼핑몰 링크 탐색
                     const shopLink = await fetchShopLink(p.sourceUrl);
                     if (shopLink) {
                         imageUrl = await fetchShopImage(shopLink);
-                        // 쇼핑몰 링크도 함께 업데이트
-                        if (shopLink) {
-                            await prisma.product.update({
-                                where: { id: p.id },
-                                data: { affiliateLink: shopLink },
-                            });
-                        }
+                        await prisma.product.update({
+                            where: { id: p.id },
+                            data: { affiliateLink: shopLink },
+                        });
                     }
+                }
+
+                // 2차 폴백: 네이버 쇼핑 API로 상품명 검색
+                // 봇 차단 / 쇼핑몰 링크 없는 경우에도 이미지 확보 가능
+                if (!imageUrl) {
+                    imageUrl = await searchNaverImage(p.title);
                 }
 
                 if (imageUrl) {
