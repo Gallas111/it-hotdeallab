@@ -55,7 +55,7 @@ export default function Image() {
                     fontWeight: 600,
                 }}
             >
-                실시간 IT/가전 핫딜 모음
+                매일 쏟아지는 IT/가전 핫딜, 한눈에.
             </div>
 
             {/* 도메인 */}
