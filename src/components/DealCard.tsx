@@ -26,6 +26,18 @@ function timeAgo(date: Date): string {
     return `${Math.floor(h / 24)}일 전`;
 }
 
+function timeRemaining(createdAt: Date): { text: string; color: string } | null {
+    const expiresAt = new Date(createdAt).getTime() + 3 * 24 * 60 * 60 * 1000;
+    const remaining = expiresAt - Date.now();
+    if (remaining <= 0) return null;
+    const h = Math.floor(remaining / 3600000);
+    const m = Math.floor((remaining % 3600000) / 60000);
+    if (h < 6) return { text: `⏰ ${h}시간 ${m}분 후 종료`, color: "#ef4444" };
+    if (h < 24) return { text: `⏰ ${h}시간 후 종료`, color: "#f97316" };
+    const d = Math.floor(h / 24);
+    return { text: `${d}일 후 종료`, color: "var(--muted)" };
+}
+
 export default function DealCard({ product }: DealCardProps) {
     const hasDiscount = product.discountPercent > 0;
     const hasPrice = product.salePrice > 0;
@@ -91,9 +103,19 @@ export default function DealCard({ product }: DealCardProps) {
                             </span>
                         )}
                     </div>
-                    <span style={{ fontSize: 11, color: "var(--muted)", flexShrink: 0 }}>
-                        {timeAgo(product.createdAt)}
-                    </span>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                        {(() => {
+                            const tr = timeRemaining(product.createdAt);
+                            return tr ? (
+                                <span style={{ fontSize: 10, fontWeight: 700, color: tr.color, flexShrink: 0 }}>
+                                    {tr.text}
+                                </span>
+                            ) : null;
+                        })()}
+                        <span style={{ fontSize: 11, color: "var(--muted)", flexShrink: 0 }}>
+                            {timeAgo(product.createdAt)}
+                        </span>
+                    </div>
                 </div>
             </div>
         </Link>

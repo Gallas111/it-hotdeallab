@@ -3,6 +3,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import ShareButtons from "@/components/ShareButtons";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,20 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
         return `${Math.floor(h / 24)}일 전`;
     })();
 
+    const timeRemaining = (() => {
+        const expiresAt = new Date(p.createdAt).getTime() + 3 * 24 * 60 * 60 * 1000;
+        const remaining = expiresAt - Date.now();
+        if (remaining <= 0) return null;
+        const h = Math.floor(remaining / 3600000);
+        const m = Math.floor((remaining % 3600000) / 60000);
+        if (h < 6) return { text: `⏰ ${h}시간 ${m}분 후 딜 종료`, color: "#ef4444" };
+        if (h < 24) return { text: `⏰ ${h}시간 후 딜 종료`, color: "#f97316" };
+        const d = Math.floor(h / 24);
+        return { text: `${d}일 후 종료`, color: "var(--muted)" };
+    })();
+
+    const pageUrl = `https://ithotdealab.com/deal/${p.id}`;
+
     return (
         <div className="detail-wrap">
             {/* 뒤로 가기 */}
@@ -52,10 +67,20 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
             {/* 메인 카드 */}
             <div className="detail-card">
                 {/* 뱃지 */}
-                <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+                <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
                     <span className="badge badge-red">{p.category}</span>
                     <span className="badge badge-gray">{p.mallName}</span>
                     <span className="badge badge-gray" style={{ marginLeft: "auto" }}>{timeAgo} 등록</span>
+                    {timeRemaining && (
+                        <span style={{
+                            fontSize: 12, fontWeight: 700,
+                            color: timeRemaining.color,
+                            background: timeRemaining.color === "#ef4444" ? "#fef2f2" : timeRemaining.color === "#f97316" ? "#fff7ed" : "var(--surface2)",
+                            padding: "2px 8px", borderRadius: 6,
+                        }}>
+                            {timeRemaining.text}
+                        </span>
+                    )}
                 </div>
 
                 {/* 제목 */}
@@ -132,6 +157,12 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
                     }}>
                         📝 원본 게시글 보기
                     </Link>
+                </div>
+
+                {/* 공유 버튼 */}
+                <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", marginBottom: 10 }}>이 딜 공유하기</p>
+                    <ShareButtons title={`[IT핫딜] ${p.title} - ${p.salePrice.toLocaleString()}원`} url={pageUrl} />
                 </div>
             </div>
 
