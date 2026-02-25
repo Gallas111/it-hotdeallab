@@ -397,7 +397,7 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
                             <button
                                 key={cat}
                                 onClick={() => setFilterCategory(cat)}
-                                className={`rounded-lg px-3 py-1 text-[12px] font-bold transition-all border ${
+                                className={`rounded-xl px-4 py-2 text-[13px] font-bold transition-all border ${
                                     active
                                         ? "bg-[var(--primary)] text-white border-transparent"
                                         : "bg-transparent text-gray-500 border-gray-200 hover:border-gray-400 dark:border-white/10 dark:text-gray-400"
