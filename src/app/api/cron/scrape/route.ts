@@ -344,56 +344,6 @@ async function scrapePpomppu(): Promise<RawDeal[]> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 소스 3: 루리웹 핫딜 (RSS 피드 사용 - 봇 차단 우회)
-// ═══════════════════════════════════════════════════════════
-async function scrapeRuliweb(): Promise<RawDeal[]> {
-    try {
-        const { data: xml } = await axios.get(
-            "https://bbs.ruliweb.com/market/board/1020.rss/rss",
-            {
-                headers: {
-                    ...HEADERS,
-                    Referer: "https://bbs.ruliweb.com/",
-                    Accept: "application/rss+xml, text/xml, application/xml, */*",
-                },
-                timeout: 10000,
-            }
-        );
-        const $ = cheerio.load(xml, { xmlMode: true });
-        const deals: RawDeal[] = [];
-
-        $("item").each((i, el) => {
-            if (i >= 15) return;
-            const title = $(el).find("title").text().trim();
-            if (!title || title.length < 5) return;
-
-            // cheerio가 <link>를 HTML void 요소로 처리할 수 있어 직접 정규식으로 추출
-            const itemXml = $.html(el);
-            const linkMatch = itemXml.match(/<link[^>]*>([\s\S]*?)<\/link>/i);
-            let link = linkMatch?.[1]?.trim()
-                || $(el).find("link").text().trim()
-                || $(el).find("guid").text().trim();
-
-            if (!link || !link.startsWith("http")) return;
-            // RSS URL에 .rss가 섞인 경우 정리
-            link = link.replace("/board/1020.rss/", "/board/1020/");
-
-            // description CDATA에서 이미지 URL 추출
-            const desc = $(el).find("description").html() || "";
-            const imgMatch = desc.match(/src=["'](https?:\/\/[^"'\s]+\.(?:webp|jpe?g|png)[^"'\s]*?)["']/i);
-            const imageUrl = imgMatch?.[1] || undefined;
-
-            const mallMatch = title.match(/\[([^\]]+)\]/);
-            deals.push({ title, link, mallName: mallMatch?.[1] || "루리웹", source: "루리웹", imageUrl });
-        });
-
-        return deals;
-    } catch {
-        return [];
-    }
-}
-
-
 // ═══════════════════════════════════════════════════════════
 // 소스 5: 네이버 쇼핑 API (병렬 처리)
 // ═══════════════════════════════════════════════════════════
@@ -523,18 +473,16 @@ async function runScrape() {
     }
     const expired = { count: hardExpired.count + softDeleted };
 
-    const [clienDeals, ppomppuDeals, ruliwebDeals, naverDeals] = await Promise.all([
+    const [clienDeals, ppomppuDeals, naverDeals] = await Promise.all([
         scrapeClien(),
         scrapePpomppu(),
-        scrapeRuliweb(),
         scrapeNaverShopping(),
     ]);
 
-    const allDeals = interleaveDeals(clienDeals, ppomppuDeals, ruliwebDeals, naverDeals);
+    const allDeals = interleaveDeals(clienDeals, ppomppuDeals, naverDeals);
     const sourceStats = {
         클리앙: clienDeals.length,
         뽐뿌: ppomppuDeals.length,
-        루리웹: ruliwebDeals.length,
         네이버쇼핑: naverDeals.length,
     };
 
@@ -658,7 +606,7 @@ async function runScrape() {
 
     await sendTelegramAlert(results);
 
-    const communitySources = ["클리앙", "뽐뿌", "루리웹"];
+    const communitySources = ["클리앙", "뽐뿌"];
     const hasBrokenSource = communitySources.some(src => (sourceStats as any)[src] === 0);
     const totalActive = await prisma.product.count({ where: { isActive: true } });
     if (hasBrokenSource || totalActive < 5) {
