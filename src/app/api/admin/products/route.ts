@@ -24,11 +24,20 @@ export async function GET() {
 }
 
 export async function PATCH(request: Request) {
-    const { id, affiliateLink, imageUrl } = await request.json();
+    const { id, affiliateLink, imageUrl, salePrice, originalPrice } = await request.json();
     if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
-    const data: Record<string, string> = {};
+    const data: Record<string, any> = {};
     if (affiliateLink) data.affiliateLink = affiliateLink;
     if (imageUrl) data.imageUrl = imageUrl;
+    if (salePrice !== undefined) {
+        const sale = Number(salePrice) || 0;
+        const orig = Number(originalPrice) || 0;
+        data.salePrice = sale;
+        data.originalPrice = orig;
+        data.discountPercent = orig > 0 && sale > 0 && orig > sale
+            ? Math.round(((orig - sale) / orig) * 100)
+            : 0;
+    }
     if (Object.keys(data).length === 0) return NextResponse.json({ error: "no fields to update" }, { status: 400 });
     const updated = await prisma.product.update({ where: { id }, data });
     return NextResponse.json({ success: true, title: updated.title });

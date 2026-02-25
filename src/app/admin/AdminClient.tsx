@@ -30,6 +30,10 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
     const [manualStatus, setManualStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
     const [manualResult, setManualResult] = useState("");
     const [filterCategory, setFilterCategory] = useState("전체");
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editSale, setEditSale] = useState("");
+    const [editOrig, setEditOrig] = useState("");
+    const [editSaving, setEditSaving] = useState(false);
     const [linkUpdateStatus, setLinkUpdateStatus] = useState<"idle" | "loading" | "done">("idle");
     const [imageUpdateStatus, setImageUpdateStatus] = useState<"idle" | "loading" | "done">("idle");
     const [imageUpdateResult, setImageUpdateResult] = useState<string>("");
@@ -153,6 +157,29 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
         if (!confirm("이 핫딜을 삭제하시겠습니까?")) return;
         await fetch(`/api/admin/products?id=${id}`, { method: "DELETE" });
         setProducts(prev => prev.filter(p => p.id !== id));
+    };
+
+    const startEdit = (p: Product) => {
+        setEditingId(p.id);
+        setEditSale(p.salePrice > 0 ? String(p.salePrice) : "");
+        setEditOrig(String((p as any).originalPrice ?? 0));
+    };
+
+    const handleSavePrice = async (id: string) => {
+        setEditSaving(true);
+        const res = await fetch("/api/admin/products", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, salePrice: Number(editSale), originalPrice: Number(editOrig) }),
+        });
+        if (res.ok) {
+            const sale = Number(editSale) || 0;
+            const orig = Number(editOrig) || 0;
+            const discount = orig > 0 && sale > 0 && orig > sale ? Math.round(((orig - sale) / orig) * 100) : 0;
+            setProducts(prev => prev.map(p => p.id === id ? { ...p, salePrice: sale, discountPercent: discount } : p));
+            setEditingId(null);
+        }
+        setEditSaving(false);
     };
 
     // SSR 직후 깜빡임 방지
@@ -440,37 +467,85 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
                                 </div>
 
                                 {/* 정보 */}
-                                <div className="flex-1 min-w-0 space-y-0.5">
+                                <div className="flex-1 min-w-0 space-y-1">
                                     <p className="text-[14px] font-bold text-[var(--foreground)] leading-snug" style={{
                                         display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden",
                                     }}>{p.title}</p>
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        {p.salePrice > 0 && (
-                                            <span className="text-[13px] font-black text-[var(--primary)]">
-                                                {p.salePrice.toLocaleString()}원
+
+                                    {/* 가격 인라인 수정 */}
+                                    {editingId === p.id ? (
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <input
+                                                type="number"
+                                                value={editOrig}
+                                                onChange={e => setEditOrig(e.target.value)}
+                                                placeholder="정가"
+                                                className="w-28 rounded-lg border border-gray-300 px-2 py-1 text-[12px] font-bold text-[var(--foreground)] bg-[var(--surface2)] outline-none focus:border-[var(--primary)]"
+                                            />
+                                            <span className="text-gray-400 text-[12px]">→</span>
+                                            <input
+                                                type="number"
+                                                value={editSale}
+                                                onChange={e => setEditSale(e.target.value)}
+                                                placeholder="할인가"
+                                                className="w-28 rounded-lg border border-gray-300 px-2 py-1 text-[12px] font-bold text-[var(--primary)] bg-[var(--surface2)] outline-none focus:border-[var(--primary)]"
+                                            />
+                                            {editOrig && editSale && Number(editOrig) > Number(editSale) && (
+                                                <span className="text-[11px] font-black text-red-500">
+                                                    {Math.round(((Number(editOrig) - Number(editSale)) / Number(editOrig)) * 100)}% 할인
+                                                </span>
+                                            )}
+                                            <button
+                                                onClick={() => handleSavePrice(p.id)}
+                                                disabled={editSaving}
+                                                className="rounded-lg bg-[var(--primary)] px-3 py-1 text-[12px] font-bold text-white hover:opacity-80 disabled:opacity-50"
+                                            >
+                                                {editSaving ? "저장 중..." : "저장"}
+                                            </button>
+                                            <button
+                                                onClick={() => setEditingId(null)}
+                                                className="rounded-lg border border-gray-200 px-3 py-1 text-[12px] font-bold text-gray-500 hover:bg-gray-50"
+                                            >
+                                                취소
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            {p.salePrice > 0 && (
+                                                <span className="text-[13px] font-black text-[var(--primary)]">
+                                                    {p.salePrice.toLocaleString()}원
+                                                </span>
+                                            )}
+                                            {p.discountPercent > 0 && (
+                                                <span className="text-[11px] font-bold bg-red-50 text-red-500 px-1.5 py-0.5 rounded">
+                                                    -{p.discountPercent}%
+                                                </span>
+                                            )}
+                                            <span className="text-[11px] font-bold text-gray-400 border border-gray-200 dark:border-white/10 px-1.5 py-0.5 rounded">
+                                                {p.category}
                                             </span>
-                                        )}
-                                        {p.discountPercent > 0 && (
-                                            <span className="text-[11px] font-bold bg-red-50 text-red-500 px-1.5 py-0.5 rounded">
-                                                -{p.discountPercent}%
+                                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                                p.affiliateLink.includes("clien.net")
+                                                    ? "bg-yellow-50 text-yellow-600"
+                                                    : "bg-green-50 text-green-600"
+                                            }`}>
+                                                {p.affiliateLink.includes("clien.net") ? "클리앙" : "쇼핑몰"}
                                             </span>
-                                        )}
-                                        <span className="text-[11px] font-bold text-gray-400 border border-gray-200 dark:border-white/10 px-1.5 py-0.5 rounded">
-                                            {p.category}
-                                        </span>
-                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                                            p.affiliateLink.includes("clien.net")
-                                                ? "bg-yellow-50 text-yellow-600"
-                                                : "bg-green-50 text-green-600"
-                                        }`}>
-                                            {p.affiliateLink.includes("clien.net") ? "클리앙" : "쇼핑몰"}
-                                        </span>
-                                        <span className="text-[11px] text-gray-300">{timeAgo}</span>
-                                    </div>
+                                            <span className="text-[11px] text-gray-300">{timeAgo}</span>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* 액션 */}
                                 <div className="flex gap-1.5 shrink-0">
+                                    {editingId !== p.id && (
+                                        <button
+                                            onClick={() => startEdit(p)}
+                                            className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-[12px] font-bold text-orange-500 hover:bg-orange-100 transition-colors"
+                                        >
+                                            수정
+                                        </button>
+                                    )}
                                     <a
                                         href={`/deal/${p.id}`}
                                         target="_blank"
