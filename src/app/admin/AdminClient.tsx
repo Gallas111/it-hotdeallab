@@ -29,6 +29,7 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
     const [manualCategory, setManualCategory] = useState("골드박스");
     const [manualStatus, setManualStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
     const [manualResult, setManualResult] = useState("");
+    const [filterCategory, setFilterCategory] = useState("전체");
     const [linkUpdateStatus, setLinkUpdateStatus] = useState<"idle" | "loading" | "done">("idle");
     const [imageUpdateStatus, setImageUpdateStatus] = useState<"idle" | "loading" | "done">("idle");
     const [imageUpdateResult, setImageUpdateResult] = useState<string>("");
@@ -378,13 +379,34 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
             <section className="card-section space-y-4">
                 <div className="flex items-center gap-3 border-b border-gray-50 pb-4 dark:border-white/5">
                     <span className="h-5 w-1 rounded-full bg-blue-500"></span>
-                    <h3 className="text-[17px] font-extrabold text-[var(--foreground)]">등록된 핫딜 ({products.length})</h3>
+                    <h3 className="text-[17px] font-extrabold text-[var(--foreground)]">
+                        등록된 핫딜 ({filterCategory === "전체" ? products.length : products.filter(p => p.category === filterCategory).length}/{products.length})
+                    </h3>
+                </div>
+                {/* 카테고리 필터 탭 */}
+                <div className="flex flex-wrap gap-2">
+                    {["전체", "골드박스", "Apple", "삼성/LG", "노트북/PC", "모니터/주변기기", "음향/스마트기기", "생활가전"].map(cat => {
+                        const count = cat === "전체" ? products.length : products.filter(p => p.category === cat).length;
+                        return (
+                            <button
+                                key={cat}
+                                onClick={() => setFilterCategory(cat)}
+                                className={`rounded-lg px-3 py-1.5 text-[12px] font-bold transition-all ${
+                                    filterCategory === cat
+                                        ? "bg-blue-500 text-white"
+                                        : "bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-white/10 dark:text-gray-400"
+                                }`}
+                            >
+                                {cat} ({count})
+                            </button>
+                        );
+                    })}
                 </div>
                 <div className="space-y-2">
-                    {products.length === 0 && (
-                        <p className="text-center text-gray-400 py-8 text-[14px]">등록된 핫딜이 없습니다. 크롤링을 실행해보세요.</p>
+                    {products.filter(p => filterCategory === "전체" || p.category === filterCategory).length === 0 && (
+                        <p className="text-center text-gray-400 py-8 text-[14px]">해당 카테고리에 핫딜이 없습니다.</p>
                     )}
-                    {products.map(p => (
+                    {products.filter(p => filterCategory === "전체" || p.category === filterCategory).map(p => (
                         <div key={p.id} className="flex items-center gap-3 rounded-xl border border-gray-100 p-3 dark:border-white/5">
                             {(() => {
                                 const isBroken = p.imageUrl && BROKEN_IMG_DOMAINS.some(d => p.imageUrl!.includes(d));
@@ -417,6 +439,7 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
                     ))}
                 </div>
             </section>
+
         </div>
     );
 }
