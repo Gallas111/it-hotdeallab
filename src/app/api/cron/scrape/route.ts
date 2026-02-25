@@ -372,7 +372,11 @@ export async function GET() {
                 });
                 const block = message.content[0];
                 if (block.type !== "text") throw new Error("unexpected content type");
-                aiData = JSON.parse(block.text);
+                // Claude가 JSON 외 텍스트를 포함할 수 있으므로 JSON 부분만 추출
+                const raw = block.text.trim();
+                const jsonMatch = raw.match(/\{[\s\S]*\}/);
+                if (!jsonMatch) throw new Error("no JSON in response");
+                aiData = JSON.parse(jsonMatch[0]);
             } catch (e: any) {
                 gptErrorCount++;
                 console.error("Claude Error:", e?.message || e);
