@@ -5,64 +5,7 @@ import * as zlib from "node:zlib";
 import axios from "axios";
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
-
-// ScraperAPI premium으로 쿠팡 페이지 직접 스크래핑
-async function getCoupangPageDirect(url: string): Promise<{
-    title: string;
-    salePrice: number;
-    originalPrice: number;
-    image: string | null;
-} | null> {
-    const apiKey = process.env.SCRAPERAPI_KEY;
-    if (!apiKey || !url) return null;
-
-    try {
-        const scraperUrl = `https://api.scraperapi.com/?api_key=${apiKey}&url=${encodeURIComponent(url)}&premium=true&country_code=kr`;
-        const { data: html } = await axios.get(scraperUrl, { timeout: 55000 });
-
-        if (typeof html !== "string" || html.length < 10000) return null;
-
-        let title = "";
-        let salePrice = 0;
-        let originalPrice = 0;
-        let image: string | null = null;
-
-        const ldBlocks = html.match(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g) || [];
-        for (const block of ldBlocks) {
-            try {
-                const ld = JSON.parse(block.replace(/<script[^>]*>/, "").replace(/<\/script>/, ""));
-                const offers = ld?.offers;
-                if (!offers) continue;
-
-                if (ld?.name && !title) title = ld.name;
-
-                const price = Number(offers.price || 0);
-                if (price > 0) salePrice = price;
-
-                const priceSpec = offers.priceSpecification;
-                if (priceSpec && (priceSpec.priceType || "").includes("StrikethroughPrice")) {
-                    const orig = Number(priceSpec.price || 0);
-                    if (orig > price) originalPrice = orig;
-                }
-
-                const imgs = ld?.image;
-                if (!image) {
-                    if (Array.isArray(imgs) && imgs.length > 0) image = imgs[0];
-                    else if (typeof imgs === "string") image = imgs;
-                }
-
-                if (salePrice > 0) break;
-            } catch {}
-        }
-
-        console.log(`[scraperapi] title="${title.substring(0, 40)}" sale=${salePrice} orig=${originalPrice} img=${!!image}`);
-        if (!title && salePrice === 0) return null;
-        return { title, salePrice, originalPrice, image };
-    } catch (e: any) {
-        console.error("[scraperapi] error:", e.message);
-        return null;
-    }
-}
+import { getCoupangProductInfo } from "@/lib/coupang-scraper";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -310,10 +253,10 @@ export async function POST(request: Request) {
         const productId = productIdMatch?.[1] || "";
         console.log(`[manual-deal] productId=${productId}`);
 
-        // 3. ScraperAPI로 쿠팡 페이지 직접 조회 (primary) + Naver 병렬 (fallback)
+        // 3. 스크래핑 (Scrape.do → ScraperAPI 순) + Naver 병렬 (fallback)
         const scraperTarget = productUrl.includes("coupang.com") ? productUrl : affiliateLink;
         const [scraperResult, webResult] = await Promise.all([
-            getCoupangPageDirect(scraperTarget),
+            getCoupangProductInfo(scraperTarget),
             productId ? searchNaverWeb(productId) : Promise.resolve({ title: "", originalPrice: 0, discountPercent: 0 }),
         ]);
 

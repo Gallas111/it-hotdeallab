@@ -1,67 +1,11 @@
 import { NextResponse } from "next/server";
 import axios from "axios";
 import { prisma } from "@/lib/prisma";
+import { getCoupangProductInfo } from "@/lib/coupang-scraper";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-
-// ScraperAPI premium으로 쿠팡 페이지 직접 스크래핑
-// JSON-LD의 StrikethroughPrice = 정가, offers.price = 할인가
-async function getCoupangPricesDirect(affiliateLink: string): Promise<{
-    salePrice: number;
-    originalPrice: number;
-    image: string | null;
-} | null> {
-    const apiKey = process.env.SCRAPERAPI_KEY;
-    if (!apiKey || !affiliateLink) return null;
-
-    try {
-        const scraperUrl = `https://api.scraperapi.com/?api_key=${apiKey}&url=${encodeURIComponent(affiliateLink)}&premium=true&country_code=kr`;
-        const { data: html } = await axios.get(scraperUrl, { timeout: 55000 });
-
-        if (typeof html !== "string" || html.length < 10000) return null;
-
-        let salePrice = 0;
-        let originalPrice = 0;
-        let image: string | null = null;
-
-        // JSON-LD에서 가격 추출 (가장 신뢰할 수 있는 소스)
-        const ldBlocks = html.match(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g) || [];
-        for (const block of ldBlocks) {
-            try {
-                const ld = JSON.parse(block.replace(/<script[^>]*>/, "").replace(/<\/script>/, ""));
-                const offers = ld?.offers;
-                if (!offers) continue;
-
-                // 할인가 (현재가)
-                const price = Number(offers.price || 0);
-                if (price > 0) salePrice = price;
-
-                // 정가: StrikethroughPrice = 쿠팡 취소선 가격 = 원래 정가
-                const priceSpec = offers.priceSpecification;
-                if (priceSpec && (priceSpec.priceType || "").includes("StrikethroughPrice")) {
-                    const orig = Number(priceSpec.price || 0);
-                    if (orig > price) originalPrice = orig;
-                }
-
-                // 이미지
-                const imgs = ld?.image;
-                if (Array.isArray(imgs) && imgs.length > 0) image = imgs[0];
-                else if (typeof imgs === "string") image = imgs;
-
-                if (salePrice > 0) break;
-            } catch {}
-        }
-
-        console.log(`[scraperapi] sale=${salePrice} orig=${originalPrice} img=${!!image}`);
-        if (salePrice === 0) return null;
-        return { salePrice, originalPrice, image };
-    } catch (e: any) {
-        console.error("[scraperapi] error:", e.message);
-        return null;
-    }
-}
 
 // Naver Shopping: 쿠팡 할인가 + 정가 추정
 async function getCoupangPriceFromNaver(title: string): Promise<{
@@ -136,13 +80,13 @@ export async function POST() {
             products.map(p => getCoupangPriceFromNaver(p.title))
         );
 
-        // 2단계: 정가 없는 상품만 ScraperAPI 병렬 조회
+        // 2단계: 정가 없는 상품만 직접 스크래핑 (Scrape.do → ScraperAPI 순)
         const needsDirect = products
             .map((p, i) => ({ p, naver: naverResults[i] }))
             .filter(({ naver }) => !naver || naver.originalPrice === 0);
 
         const directResults = await Promise.allSettled(
-            needsDirect.map(({ p }) => getCoupangPricesDirect(p.affiliateLink))
+            needsDirect.map(({ p }) => getCoupangProductInfo(p.affiliateLink))
         );
 
         const directMap = new Map<string, { salePrice: number; originalPrice: number; image: string | null } | null>();
@@ -160,12 +104,11 @@ export async function POST() {
             const naver = naverResults[i];
             const direct = directMap.get(p.id);
 
-            // 가격 결정: ScraperAPI 우선 (실제 상품 페이지 직접 조회라 더 정확)
-            // Naver는 다른 묶음/변형 상품 가격을 가져올 수 있음
+            // 가격 결정: 직접 스크래핑 우선 (실제 상품 페이지 직접 조회라 더 정확)
             const salePrice = direct?.salePrice || naver?.salePrice || 0;
             if (salePrice === 0) continue;
 
-            // 정가: ScraperAPI 우선, 없으면 Naver
+            // 정가: 직접 스크래핑 우선, 없으면 Naver
             const originalPrice = (direct?.originalPrice || 0) > 0
                 ? direct!.originalPrice
                 : (naver?.originalPrice || 0);
