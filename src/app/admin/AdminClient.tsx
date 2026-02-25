@@ -26,6 +26,8 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
 
     // 수동 등록
     const [manualLink, setManualLink] = useState("");
+    const [manualTitle, setManualTitle] = useState("");
+    const [manualPrice, setManualPrice] = useState("");
     const [manualCategory, setManualCategory] = useState("골드박스");
     const [manualStatus, setManualStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
     const [manualResult, setManualResult] = useState("");
@@ -126,7 +128,12 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
             const res = await fetch("/api/admin/manual-deal", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ affiliateLink: manualLink.trim(), category: manualCategory }),
+                body: JSON.stringify({
+                    affiliateLink: manualLink.trim(),
+                    category: manualCategory,
+                    title: manualTitle.trim() || undefined,
+                    price: manualPrice.trim() || undefined,
+                }),
             });
             const data = await res.json();
             if (data.success) {
@@ -286,34 +293,52 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
                         📢 이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.
                     </p>
                 </div>
-                <form onSubmit={handleManualRegister} className="flex gap-3 flex-wrap">
-                    <select
-                        value={manualCategory}
-                        onChange={e => setManualCategory(e.target.value)}
-                        className="rounded-xl border border-gray-200 px-4 py-3 text-[13px] font-bold text-[var(--foreground)] bg-[var(--surface2)] outline-none focus:border-yellow-400 dark:border-white/10 shrink-0"
-                    >
-                        <option value="골드박스">🥇 골드박스</option>
-                        <option value="Apple">🍎 Apple</option>
-                        <option value="삼성/LG">📺 삼성/LG</option>
-                        <option value="노트북/PC">💻 노트북/PC</option>
-                        <option value="모니터/주변기기">🖥 모니터/주변기기</option>
-                        <option value="음향/스마트기기">🎧 음향/스마트기기</option>
-                        <option value="생활가전">🏠 생활가전</option>
-                    </select>
-                    <input
-                        type="url"
-                        value={manualLink}
-                        onChange={e => { setManualLink(e.target.value); setManualStatus("idle"); setManualResult(""); }}
-                        placeholder="https://www.coupang.com/vp/products/... 또는 https://link.coupang.com/..."
-                        className="flex-1 min-w-0 rounded-xl border border-gray-200 px-4 py-3 text-[13px] font-medium text-[var(--foreground)] bg-[var(--surface2)] outline-none focus:border-yellow-400 dark:border-white/10"
-                    />
-                    <button
-                        type="submit"
-                        disabled={manualStatus === "loading" || !manualLink.trim()}
-                        className="rounded-xl bg-yellow-500 px-6 py-3 text-[14px] font-black text-white transition-all hover:opacity-80 disabled:opacity-50 shrink-0"
-                    >
-                        {manualStatus === "loading" ? "⏳ 등록 중..." : "➕ 등록"}
-                    </button>
+                <form onSubmit={handleManualRegister} className="space-y-3">
+                    <div className="flex gap-3 flex-wrap">
+                        <select
+                            value={manualCategory}
+                            onChange={e => setManualCategory(e.target.value)}
+                            className="rounded-xl border border-gray-200 px-4 py-3 text-[13px] font-bold text-[var(--foreground)] bg-[var(--surface2)] outline-none focus:border-yellow-400 dark:border-white/10 shrink-0"
+                        >
+                            <option value="골드박스">🥇 골드박스</option>
+                            <option value="Apple">🍎 Apple</option>
+                            <option value="삼성/LG">📺 삼성/LG</option>
+                            <option value="노트북/PC">💻 노트북/PC</option>
+                            <option value="모니터/주변기기">🖥 모니터/주변기기</option>
+                            <option value="음향/스마트기기">🎧 음향/스마트기기</option>
+                            <option value="생활가전">🏠 생활가전</option>
+                        </select>
+                        <input
+                            type="text"
+                            value={manualTitle}
+                            onChange={e => setManualTitle(e.target.value)}
+                            placeholder="상품명 입력 (필수) — 예: 삼성 갤럭시버즈3 프로"
+                            className="flex-1 min-w-0 rounded-xl border border-gray-200 px-4 py-3 text-[13px] font-medium text-[var(--foreground)] bg-[var(--surface2)] outline-none focus:border-yellow-400 dark:border-white/10"
+                        />
+                        <input
+                            type="text"
+                            value={manualPrice}
+                            onChange={e => setManualPrice(e.target.value)}
+                            placeholder="할인가 (선택) — 예: 89000"
+                            className="w-36 rounded-xl border border-gray-200 px-4 py-3 text-[13px] font-medium text-[var(--foreground)] bg-[var(--surface2)] outline-none focus:border-yellow-400 dark:border-white/10 shrink-0"
+                        />
+                    </div>
+                    <div className="flex gap-3">
+                        <input
+                            type="url"
+                            value={manualLink}
+                            onChange={e => { setManualLink(e.target.value); setManualStatus("idle"); setManualResult(""); }}
+                            placeholder="쿠팡 파트너스 링크 — https://link.coupang.com/a/..."
+                            className="flex-1 min-w-0 rounded-xl border border-gray-200 px-4 py-3 text-[13px] font-medium text-[var(--foreground)] bg-[var(--surface2)] outline-none focus:border-yellow-400 dark:border-white/10"
+                        />
+                        <button
+                            type="submit"
+                            disabled={manualStatus === "loading" || !manualLink.trim() || !manualTitle.trim()}
+                            className="rounded-xl bg-yellow-500 px-6 py-3 text-[14px] font-black text-white transition-all hover:opacity-80 disabled:opacity-50 shrink-0"
+                        >
+                            {manualStatus === "loading" ? "⏳ 등록 중..." : "➕ 등록"}
+                        </button>
+                    </div>
                 </form>
                 {manualResult && (
                     <div className={`rounded-xl p-4 text-[13px] font-bold ${manualStatus === "error" ? "bg-red-50 text-red-600" : "bg-green-50 text-green-700"}`}>

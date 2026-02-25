@@ -91,20 +91,39 @@ async function fetchProductInfo(url: string): Promise<{
 
 export async function POST(request: Request) {
     try {
-        const { affiliateLink, category: forceCategory, title: manualTitle } = await request.json();
+        const { affiliateLink, category: forceCategory, title: manualTitle, price: manualPrice } = await request.json();
         if (!affiliateLink) {
             return NextResponse.json({ error: "affiliateLink 필요" }, { status: 400 });
         }
 
-        // 상품 정보 추출
-        const { title: pageTitle, imageUrl, rawPrice, finalUrl } = await fetchProductInfo(affiliateLink);
+        // 상품 정보 추출 (페이지에서)
+        const { title: pageTitle, imageUrl: pageImageUrl, rawPrice, finalUrl } = await fetchProductInfo(affiliateLink);
 
-        // 최종 파트너스 링크 결정 (단축링크 유지 또는 직접 URL에 partnerCode 추가)
+        // 최종 파트너스 링크 결정
         const finalLink = affiliateLink.includes("link.coupang.com")
-            ? affiliateLink  // 단축링크는 그대로 (이미 파트너스 추적 포함)
+            ? affiliateLink
             : toCoupangAffiliateLink(affiliateLink);
 
         const titleForAI = manualTitle || pageTitle || "쿠팡 상품";
+        const priceForAI = manualPrice || rawPrice;
+
+        // 이미지: 페이지 추출 실패 시 네이버쇼핑 API로 검색
+        let imageUrl = pageImageUrl;
+        if (!imageUrl && titleForAI !== "쿠팡 상품") {
+            try {
+                const naverId = process.env.NAVER_CLIENT_ID;
+                const naverSecret = process.env.NAVER_CLIENT_SECRET;
+                if (naverId && naverSecret) {
+                    const { data } = await axios.get("https://openapi.naver.com/v1/search/shop.json", {
+                        params: { query: titleForAI, display: 1, sort: "sim" },
+                        headers: { "X-Naver-Client-Id": naverId, "X-Naver-Client-Secret": naverSecret },
+                        timeout: 5000,
+                    });
+                    const img = data.items?.[0]?.image;
+                    if (img) imageUrl = img.startsWith("//") ? "https:" + img : img;
+                }
+            } catch { /* 이미지 없이 진행 */ }
+        }
 
         // Claude AI 분석 - 정보가 없어도 URL만으로 최대한 생성
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
@@ -118,7 +137,7 @@ export async function POST(request: Request) {
 {"refinedTitle":"제목(50자이내)","category":"골드박스|Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"300자이상 상세설명"}`,
             messages: [{
                 role: "user",
-                content: `상품명: ${titleForAI}\n가격: ${rawPrice || "정보 없음"}\n링크: ${finalUrl}`,
+                content: `상품명: ${titleForAI}\n가격: ${priceForAI || "정보 없음"}\n링크: ${finalUrl}`,
             }],
         });
 
@@ -135,7 +154,7 @@ export async function POST(request: Request) {
         const aiData = JSON.parse(jsonMatch[0]);
 
         const originalPrice = Number(aiData.originalPrice) || 0;
-        const salePrice = Number(aiData.salePrice) || 0;
+        const salePrice = Number(aiData.salePrice) || Number(manualPrice) || 0;
         const discountPercent = originalPrice > 0 && salePrice > 0 && originalPrice > salePrice
             ? Math.round(((originalPrice - salePrice) / originalPrice) * 100)
             : 0;
