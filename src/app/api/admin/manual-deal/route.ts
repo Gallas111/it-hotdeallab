@@ -37,7 +37,6 @@ async function fetchWithBrowser(url: string): Promise<{
         // Vercel 프로덕션: sparticuz chromium, 로컬: 시스템 chromium
         if (process.env.VERCEL) {
             const chromiumBin = await import("@sparticuz/chromium");
-            chromiumBin.default.setHeadlessMode = true;
             browser = await chromium.launch({
                 args: chromiumBin.default.args,
                 executablePath: await chromiumBin.default.executablePath(),
