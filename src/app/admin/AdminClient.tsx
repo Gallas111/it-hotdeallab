@@ -32,6 +32,8 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
     const [filterCategory, setFilterCategory] = useState("전체");
     const [syncStatus, setSyncStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
     const [syncResult, setSyncResult] = useState("");
+    const [testStatus, setTestStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+    const [testResult, setTestResult] = useState("");
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editSale, setEditSale] = useState("");
     const [editOrig, setEditOrig] = useState("");
@@ -179,6 +181,26 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
         } catch (e: any) {
             setSyncStatus("error");
             setSyncResult(`❌ 요청 실패: ${e.message}`);
+        }
+    };
+
+    const handleTestScraper = async () => {
+        const coupangProduct = products.find(p => p.affiliateLink?.includes("coupang.com"));
+        if (!coupangProduct) { setTestResult("❌ 쿠팡 상품 없음"); return; }
+        setTestStatus("loading");
+        setTestResult(`테스트 중: ${coupangProduct.title.substring(0, 30)}...`);
+        try {
+            const res = await fetch("/api/admin/test-scraper", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ url: coupangProduct.affiliateLink }),
+            });
+            const data = await res.json();
+            setTestStatus(data.success ? "done" : "error");
+            setTestResult(JSON.stringify(data, null, 2));
+        } catch (e: any) {
+            setTestStatus("error");
+            setTestResult(`❌ 요청 실패: ${e.message}`);
         }
     };
 
@@ -421,6 +443,19 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
                 {syncResult && (
                     <div className={`rounded-xl px-4 py-3 text-[12px] font-bold whitespace-pre-line ${syncStatus === "error" ? "bg-red-50 text-red-600" : "bg-orange-50 text-orange-700"}`}>
                         {syncResult}
+                    </div>
+                )}
+                <button
+                    onClick={handleTestScraper}
+                    disabled={testStatus === "loading"}
+                    className="rounded-xl bg-slate-500 px-4 py-2 text-[12px] font-bold text-white transition-all hover:opacity-80 disabled:opacity-50"
+                >
+                    {testStatus === "loading" ? "⏳ 테스트 중..." : "🔍 스크래퍼 테스트"}
+                </button>
+                {testResult && (
+                    <div className={`rounded-xl px-4 py-3 text-[11px] font-mono whitespace-pre-wrap break-all ${testStatus === "error" ? "bg-red-50 text-red-600" : "bg-slate-50 text-slate-700"}`}
+                        style={{ maxHeight: 300, overflowY: "auto" }}>
+                        {testResult}
                     </div>
                 )}
                 {scrapeResult && (
