@@ -310,7 +310,7 @@ async function scrapeRuliweb(): Promise<RawDeal[]> {
 
             // cheerio가 <link>를 HTML void 요소로 처리할 수 있어 직접 정규식으로 추출
             const itemXml = $.html(el);
-            const linkMatch = itemXml.match(/<link[^>]*>(.*?)<\/link>/is);
+            const linkMatch = itemXml.match(/<link[^>]*>([\s\S]*?)<\/link>/i);
             let link = linkMatch?.[1]?.trim()
                 || $(el).find("link").text().trim()
                 || $(el).find("guid").text().trim();
