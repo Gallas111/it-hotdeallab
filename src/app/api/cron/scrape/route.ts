@@ -350,7 +350,7 @@ export async function GET() {
             let aiData: any = {};
             try {
                 const message = await anthropic.messages.create({
-                    model: "claude-3-5-haiku-20241022",
+                    model: "claude-sonnet-4-6",
                     max_tokens: 1000,
                     system: `IT/가전 핫딜 전문 큐레이터. 아래 두 조건을 모두 충족해야만 등록.
 
