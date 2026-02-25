@@ -83,13 +83,17 @@ export default function DealCard({ product }: DealCardProps) {
                 {/* 하단: 가격 + 시간 */}
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                        {hasPrice && (
+                        {hasPrice ? (
                             <span style={{
                                 fontSize: 16, fontWeight: 900,
                                 color: "var(--primary)",
                                 letterSpacing: "-0.03em",
                             }}>
                                 {product.salePrice.toLocaleString()}원
+                            </span>
+                        ) : (
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>
+                                가격 확인
                             </span>
                         )}
                         {hasDiscount && (

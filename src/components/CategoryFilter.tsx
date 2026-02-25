@@ -27,22 +27,24 @@ export default function CategoryFilter() {
     return (
         <div style={{
             position: "sticky", top: 52, zIndex: 40,
-            background: "rgba(255,255,255,0.95)",
+            background: "var(--filter-bg)",
             backdropFilter: "blur(10px)",
             borderBottom: "1px solid var(--border)",
             width: "100%",
         }}>
             <div style={{ maxWidth: 980, margin: "0 auto", padding: "8px 16px" }}>
-                <div className="tab-bar">
-                    {CATEGORIES.map(cat => (
-                        <button
-                            key={cat.value}
-                            onClick={() => handleClick(cat.value)}
-                            className={`tab-btn${current === cat.value ? " active" : ""}`}
-                        >
-                            {cat.label}
-                        </button>
-                    ))}
+                <div className="tab-bar-wrap">
+                    <div className="tab-bar">
+                        {CATEGORIES.map(cat => (
+                            <button
+                                key={cat.value}
+                                onClick={() => handleClick(cat.value)}
+                                className={`tab-btn${current === cat.value ? " active" : ""}`}
+                            >
+                                {cat.label}
+                            </button>
+                        ))}
+                    </div>
                 </div>
             </div>
         </div>

@@ -6,18 +6,25 @@ export const dynamic = "force-dynamic";
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ category?: string }>;
+  searchParams: Promise<{ category?: string; q?: string }>;
 }) {
-  const { category } = await searchParams;
+  const { category, q } = await searchParams;
 
   const deals = await prisma.product.findMany({
     where: {
       isActive: true,
       ...(category && category !== "전체" ? { category } : {}),
+      ...(q ? { title: { contains: q, mode: "insensitive" } } : {}),
     },
     orderBy: { createdAt: "desc" },
     take: 40,
   });
+
+  const sectionTitle = q
+    ? `"${q}" 검색 결과`
+    : category && category !== "전체"
+    ? `${category} 핫딜`
+    : "실시간 IT 핫딜";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -32,7 +39,7 @@ export default async function Home({
             boxShadow: "0 0 0 3px rgba(255,59,48,0.2)",
           }} />
           <h2 style={{ fontSize: 15, fontWeight: 800, color: "var(--foreground)", letterSpacing: "-0.02em" }}>
-            {category && category !== "전체" ? `${category} 핫딜` : "실시간 IT 핫딜"}
+            {sectionTitle}
           </h2>
           {deals.length > 0 && (
             <span className="badge badge-gray">{deals.length}개</span>

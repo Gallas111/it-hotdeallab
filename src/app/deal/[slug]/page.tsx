@@ -74,8 +74,28 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
 
     const pageUrl = `https://ithotdealab.com/deal/${p.id}`;
 
+    const jsonLd = p.salePrice > 0 ? {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": p.title,
+        ...(p.imageUrl ? { "image": p.imageUrl } : {}),
+        "offers": {
+            "@type": "Offer",
+            "price": p.salePrice,
+            "priceCurrency": "KRW",
+            "availability": "https://schema.org/InStock",
+            "url": p.affiliateLink,
+        },
+    } : null;
+
     return (
         <div className="detail-wrap">
+            {jsonLd && (
+                <script
+                    type="application/ld+json"
+                    dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+                />
+            )}
             {/* 뒤로 가기 */}
             <Link href="/" style={{
                 display: "inline-flex", alignItems: "center", gap: 6,
@@ -149,7 +169,7 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
                 {/* 이미지 */}
                 {p.imageUrl && (
                     <div style={{
-                        position: "relative", width: "100%", aspectRatio: "16/9",
+                        position: "relative", width: "100%", aspectRatio: "1/1",
                         borderRadius: 8, overflow: "hidden",
                         background: "var(--surface2)", marginBottom: 20,
                         border: "1px solid var(--border)",
@@ -166,7 +186,10 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
                 {/* 공유 버튼 */}
                 <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
                     <p style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", marginBottom: 10 }}>이 딜 공유하기</p>
-                    <ShareButtons title={`[IT핫딜] ${p.title} - ${p.salePrice.toLocaleString()}원`} url={pageUrl} />
+                    <ShareButtons
+                        title={p.salePrice > 0 ? `[IT핫딜] ${p.title} - ${p.salePrice.toLocaleString()}원` : `[IT핫딜] ${p.title}`}
+                        url={pageUrl}
+                    />
                 </div>
             </div>
 
