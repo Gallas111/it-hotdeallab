@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import axios from "axios";
 import * as cheerio from "cheerio";
-import { OpenAI } from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -302,7 +302,7 @@ async function scrapeNaverShopping(): Promise<RawDeal[]> {
 // 메인 핸들러
 // ═══════════════════════════════════════════════════════════
 export async function GET() {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
     try {
         // ── 1. 만료 딜 자동 삭제 (3일 이상 된 핫딜) ─────────────
@@ -338,15 +338,13 @@ export async function GET() {
             const exists = await prisma.product.findFirst({ where: { sourceUrl: deal.link } });
             if (exists) { dedupCount++; continue; }
 
-            // OpenAI: IT 핫딜 여부 판별
+            // Claude: IT 핫딜 여부 판별
             let aiData: any = {};
             try {
-                const completion = await openai.chat.completions.create({
-                    model: "gpt-4o-mini",
-                    messages: [
-                        {
-                            role: "system",
-                            content: `IT/가전 핫딜 전문 큐레이터. 아래 두 조건을 모두 충족해야만 등록.
+                const message = await anthropic.messages.create({
+                    model: "claude-haiku-4-5-20251001",
+                    max_tokens: 1000,
+                    system: `IT/가전 핫딜 전문 큐레이터. 아래 두 조건을 모두 충족해야만 등록.
 
 [등록 조건 - 반드시 둘 다 충족]
 1. IT/전자기기/가전 제품 (노트북, 스마트폰, 모니터, 이어폰, 키보드 등 하드웨어)
@@ -358,19 +356,19 @@ export async function GET() {
 - 소프트웨어·게임·구독 서비스 (하드웨어만 허용)
 - 중고/리퍼라도 특별 할인이 없으면 제외
 
-조건 미충족: {"isIT":false}
+반드시 JSON만 반환. 조건 미충족: {"isIT":false}
 조건 충족 시:
 {"isIT":true,"refinedTitle":"가격 혜택 강조 제목(50자이내)","category":"Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄(예:20%할인/역대최저/오늘만특가)","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"500자이상 상세설명"}`,
-                        },
+                    messages: [
                         { role: "user", content: `출처:${deal.source} 제목:${deal.title}` },
                     ],
-                    response_format: { type: "json_object" },
-                    max_tokens: 1000,
                 });
-                aiData = JSON.parse(completion.choices[0].message.content || "{}");
+                const block = message.content[0];
+                if (block.type !== "text") throw new Error("unexpected content type");
+                aiData = JSON.parse(block.text);
             } catch (e: any) {
                 gptErrorCount++;
-                console.error("GPT Error:", e?.message || e);
+                console.error("Claude Error:", e?.message || e);
                 continue;
             }
 
