@@ -49,7 +49,6 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
     if (!p) notFound();
 
     const pros = p.aiPros.split(",").map(s => s.trim()).filter(Boolean);
-    const isClienLink = p.affiliateLink.includes("clien.net");
 
     const timeAgo = (() => {
         const diff = Date.now() - new Date(p.createdAt).getTime();
@@ -155,31 +154,10 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
                     </div>
                 )}
 
-                {/* 클리앙 링크 안내 */}
-                {isClienLink && (
-                    <div style={{
-                        background: "var(--surface2)", border: "1px solid var(--border)",
-                        borderRadius: 8, padding: "10px 14px",
-                        marginBottom: 14,
-                        fontSize: 13, color: "var(--muted)", lineHeight: 1.6,
-                    }}>
-                        ⚠️ 아래 버튼을 누르면 원본 게시글로 이동합니다. 게시글 내 링크를 클릭해 구매하세요.
-                    </div>
-                )}
-
                 {/* CTA 버튼 */}
                 <a href={p.affiliateLink} target="_blank" rel="noopener noreferrer" className="btn-primary">
-                    {isClienLink ? "원본 게시글에서 구매링크 확인" : `${p.mallName}에서 구매하기`}
+                    {p.mallName}에서 구매하기
                 </a>
-
-                {/* 원본 링크 */}
-                <div style={{ marginTop: 12, textAlign: "center" }}>
-                    <Link href={p.sourceUrl} target="_blank" rel="noopener noreferrer" style={{
-                        fontSize: 12, color: "var(--muted)", textDecoration: "none",
-                    }}>
-                        📝 원본 게시글 보기
-                    </Link>
-                </div>
 
                 {/* 공유 버튼 */}
                 <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
@@ -282,7 +260,7 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
                 )}
                 <a href={p.affiliateLink} target="_blank" rel="noopener noreferrer"
                     className="btn-primary" style={{ flex: 1, fontSize: 14, padding: "12px" }}>
-                    {isClienLink ? "원본 게시글 보기" : "최저가 구매하기"}
+                    구매하러 가기
                 </a>
             </div>
         </div>
