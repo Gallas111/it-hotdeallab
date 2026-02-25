@@ -6,6 +6,64 @@ import axios from "axios";
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
 
+// ScraperAPI premium으로 쿠팡 페이지 직접 스크래핑
+async function getCoupangPageDirect(url: string): Promise<{
+    title: string;
+    salePrice: number;
+    originalPrice: number;
+    image: string | null;
+} | null> {
+    const apiKey = process.env.SCRAPERAPI_KEY;
+    if (!apiKey || !url) return null;
+
+    try {
+        const scraperUrl = `https://api.scraperapi.com/?api_key=${apiKey}&url=${encodeURIComponent(url)}&premium=true&country_code=kr`;
+        const { data: html } = await axios.get(scraperUrl, { timeout: 55000 });
+
+        if (typeof html !== "string" || html.length < 10000) return null;
+
+        let title = "";
+        let salePrice = 0;
+        let originalPrice = 0;
+        let image: string | null = null;
+
+        const ldBlocks = html.match(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g) || [];
+        for (const block of ldBlocks) {
+            try {
+                const ld = JSON.parse(block.replace(/<script[^>]*>/, "").replace(/<\/script>/, ""));
+                const offers = ld?.offers;
+                if (!offers) continue;
+
+                if (ld?.name && !title) title = ld.name;
+
+                const price = Number(offers.price || 0);
+                if (price > 0) salePrice = price;
+
+                const priceSpec = offers.priceSpecification;
+                if (priceSpec && (priceSpec.priceType || "").includes("StrikethroughPrice")) {
+                    const orig = Number(priceSpec.price || 0);
+                    if (orig > price) originalPrice = orig;
+                }
+
+                const imgs = ld?.image;
+                if (!image) {
+                    if (Array.isArray(imgs) && imgs.length > 0) image = imgs[0];
+                    else if (typeof imgs === "string") image = imgs;
+                }
+
+                if (salePrice > 0) break;
+            } catch {}
+        }
+
+        console.log(`[scraperapi] title="${title.substring(0, 40)}" sale=${salePrice} orig=${originalPrice} img=${!!image}`);
+        if (!title && salePrice === 0) return null;
+        return { title, salePrice, originalPrice, image };
+    } catch (e: any) {
+        console.error("[scraperapi] error:", e.message);
+        return null;
+    }
+}
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -252,36 +310,42 @@ export async function POST(request: Request) {
         const productId = productIdMatch?.[1] || "";
         console.log(`[manual-deal] productId=${productId}`);
 
-        // 3. Naver 웹검색으로 상품명 + 가격 힌트 조회
-        let pageTitle = "";
-        let webkrOriginalPrice = 0;
-        let webkrDiscountPercent = 0;
-        if (productId) {
-            const webResult = await searchNaverWeb(productId);
-            pageTitle = webResult.title;
-            webkrOriginalPrice = webResult.originalPrice;
-            webkrDiscountPercent = webResult.discountPercent;
-        }
-        console.log(`[manual-deal] title="${pageTitle}" webkrOrig=${webkrOriginalPrice} webkrDisc=${webkrDiscountPercent}%`);
+        // 3. ScraperAPI로 쿠팡 페이지 직접 조회 (primary) + Naver 병렬 (fallback)
+        const scraperTarget = productUrl.includes("coupang.com") ? productUrl : affiliateLink;
+        const [scraperResult, webResult] = await Promise.all([
+            getCoupangPageDirect(scraperTarget),
+            productId ? searchNaverWeb(productId) : Promise.resolve({ title: "", originalPrice: 0, discountPercent: 0 }),
+        ]);
 
-        // 4. Naver Shopping으로 이미지+가격 (쿠팡 리스팅 우선)
-        let imageUrl: string | null = null;
-        let rawPrice = "";
-        let rawOriginalPrice = "";
-        if (pageTitle) {
-            const shop = await searchNaverShopping(pageTitle);
-            imageUrl = shop.image;
-            rawPrice = shop.price;
-            rawOriginalPrice = shop.originalPrice;
-            if (!pageTitle && shop.title) pageTitle = shop.title;
+        console.log(`[manual-deal] scraper title="${scraperResult?.title?.substring(0, 30)}" sale=${scraperResult?.salePrice} orig=${scraperResult?.originalPrice}`);
+        console.log(`[manual-deal] webkr title="${webResult.title}" orig=${webResult.originalPrice} disc=${webResult.discountPercent}%`);
+
+        // 제목: ScraperAPI 우선, 없으면 Naver webkr
+        let pageTitle = scraperResult?.title || webResult.title || "";
+
+        // 이미지/가격: ScraperAPI 우선
+        let imageUrl: string | null = scraperResult?.image || null;
+        let rawPrice = scraperResult?.salePrice ? String(scraperResult.salePrice) : "";
+        let rawOriginalPrice = scraperResult?.originalPrice ? String(scraperResult.originalPrice) : "";
+
+        // 4. ScraperAPI로 부족한 정보만 Naver Shopping으로 보완
+        if (!imageUrl || !rawPrice || !pageTitle) {
+            const shopQuery = pageTitle || (productId ? `쿠팡 ${productId}` : "");
+            if (shopQuery) {
+                const shop = await searchNaverShopping(shopQuery);
+                if (!imageUrl && shop.image) imageUrl = shop.image;
+                if (!rawPrice && shop.price) rawPrice = shop.price;
+                if (!rawOriginalPrice && shop.originalPrice) rawOriginalPrice = shop.originalPrice;
+                if (!pageTitle && shop.title) pageTitle = shop.title;
+            }
         }
 
-        // hprice가 없으면 webkr에서 얻은 정가 사용
-        if (!rawOriginalPrice && webkrOriginalPrice > 0) {
-            rawOriginalPrice = String(webkrOriginalPrice);
+        // 정가: ScraperAPI → Naver Shopping → Naver webkr 순
+        if (!rawOriginalPrice && webResult.originalPrice > 0) {
+            rawOriginalPrice = String(webResult.originalPrice);
         }
 
-        console.log(`[manual-deal] image="${imageUrl?.substring(0, 60)}" price="${rawPrice}" origPrice="${rawOriginalPrice}"`);
+        console.log(`[manual-deal] final title="${pageTitle}" price="${rawPrice}" orig="${rawOriginalPrice}" img=${!!imageUrl}`);
 
         // 파트너스 링크 결정
         const finalLink = affiliateLink.includes("link.coupang.com")
@@ -305,7 +369,7 @@ export async function POST(request: Request) {
 {"refinedTitle":"제목(50자이내)","category":"골드박스|Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"300자이상 상세설명"}`,
             messages: [{
                 role: "user",
-                content: `상품명: ${pageTitle}\n현재가: ${rawPrice ? rawPrice + "원" : "정보 없음"}\n정가: ${rawOriginalPrice ? rawOriginalPrice + "원" : "정보 없음"}${webkrDiscountPercent > 0 ? `\n할인율 힌트: ${webkrDiscountPercent}%` : ""}\n링크: ${productUrl}`,
+                content: `상품명: ${pageTitle}\n현재가: ${rawPrice ? rawPrice + "원" : "정보 없음"}\n정가: ${rawOriginalPrice ? rawOriginalPrice + "원" : "정보 없음"}${webResult.discountPercent > 0 && !rawOriginalPrice ? `\n할인율 힌트: ${webResult.discountPercent}%` : ""}\n링크: ${productUrl}`,
             }],
         });
 
@@ -316,11 +380,12 @@ export async function POST(request: Request) {
         if (!jsonMatch) throw new Error(`AI 응답 파싱 실패: ${raw.substring(0, 100)}`);
         const aiData = JSON.parse(jsonMatch[0]);
 
-        const originalPrice = Number(aiData.originalPrice) || 0;
-        const salePrice = Number(aiData.salePrice) || 0;
+        // 가격: ScraperAPI 값 우선 (더 정확), 없으면 AI 분석값
+        const finalSalePrice = scraperResult?.salePrice || Number(aiData.salePrice) || 0;
+        const finalOriginalPrice = scraperResult?.originalPrice || Number(aiData.originalPrice) || 0;
         const discountPercent =
-            originalPrice > 0 && salePrice > 0 && originalPrice > salePrice
-                ? Math.round(((originalPrice - salePrice) / originalPrice) * 100)
+            finalOriginalPrice > 0 && finalSalePrice > 0 && finalOriginalPrice > finalSalePrice
+                ? Math.round(((finalOriginalPrice - finalSalePrice) / finalOriginalPrice) * 100)
                 : 0;
 
         const product = await prisma.product.create({
@@ -328,8 +393,8 @@ export async function POST(request: Request) {
                 title: aiData.refinedTitle || pageTitle,
                 slug: generateSlug(aiData.refinedTitle || pageTitle),
                 imageUrl: imageUrl || undefined,
-                originalPrice,
-                salePrice,
+                originalPrice: finalOriginalPrice,
+                salePrice: finalSalePrice,
                 discountPercent,
                 category: forceCategory || aiData.category || "골드박스",
                 mallName: "쿠팡",
