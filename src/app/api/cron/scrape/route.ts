@@ -73,19 +73,19 @@ async function fetchShopLink(postUrl: string, referer: string): Promise<string |
             if (href.startsWith("http") && isShopLink(href)) found = href;
         });
 
-        // 2. 뽐뿌 s.ppomppu.co.kr base64 인코딩 링크 해독
+        // 2. 뽐뿌 s.ppomppu.co.kr base64 링크 해독 (unquoted href 대비 raw HTML 파싱)
         if (!found) {
-            $("a[href*='s.ppomppu.co.kr']").each((_, el) => {
-                if (found) return;
-                const href = $(el).attr("href") || "";
-                const m = href.match(/[?&]target=([^&]+)/);
+            const rawMatches = (typeof html === "string" ? html : "")
+                .match(/s\.ppomppu\.co\.kr[^"'\s>]*target=([A-Za-z0-9+/=]+)/g) || [];
+            for (const raw of rawMatches) {
+                const m = raw.match(/target=([A-Za-z0-9+/=]+)/);
                 if (m) {
                     try {
                         const decoded = Buffer.from(m[1], "base64").toString("utf-8");
-                        if (decoded.startsWith("http") && isShopLink(decoded)) found = decoded;
+                        if (decoded.startsWith("http") && isShopLink(decoded)) { found = decoded; break; }
                     } catch { /* skip */ }
                 }
-            });
+            }
         }
 
         // 3. 리다이렉트 패턴 (url= 파라미터)
