@@ -502,10 +502,10 @@ async function runScrape() {
         where: { createdAt: { lt: sevenDaysAgo } },
     });
 
-    // 3~7일 → 쇼핑몰 페이지 품절/404 확인 후 삭제
-    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    // 전체 딜 품절/404 체크 (오래된 순으로 10개씩 순환)
+    // → 신규 딜 포함 모든 딜이 매 실행마다 점진적으로 체크됨
     const candidates = await prisma.product.findMany({
-        where: { createdAt: { lt: threeDaysAgo, gte: sevenDaysAgo } },
+        orderBy: { createdAt: "asc" },
         select: { id: true, affiliateLink: true },
         take: 10,
     });
