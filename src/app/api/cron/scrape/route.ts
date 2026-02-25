@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import axios from "axios";
 import * as cheerio from "cheerio";
 import Anthropic from "@anthropic-ai/sdk";
@@ -406,70 +407,49 @@ function interleaveDeals(...sources: RawDeal[][]): RawDeal[] {
 // ═══════════════════════════════════════════════════════════
 // 메인 핸들러
 // ═══════════════════════════════════════════════════════════
-export async function GET(request: Request) {
-    // CRON_SECRET 인증 (설정된 경우에만 검증)
-    const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret) {
-        const auth = request.headers.get("authorization");
-        if (auth !== `Bearer ${cronSecret}`) {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-        }
-    }
+async function runScrape() {
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
-    if (!process.env.ANTHROPIC_API_KEY) {
-        return NextResponse.json({ error: "ANTHROPIC_API_KEY 환경변수 미설정" }, { status: 500 });
-    }
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    // ── 1. 만료 딜 자동 삭제 (3일 이상 된 핫딜) ─────────────
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    const expired = await prisma.product.deleteMany({
+        where: { createdAt: { lt: threeDaysAgo } },
+    });
 
-    try {
-        // ── 1. 만료 딜 자동 삭제 (3일 이상 된 핫딜) ─────────────
-        const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-        const expired = await prisma.product.deleteMany({
-            where: { createdAt: { lt: threeDaysAgo } },
-        });
+    const [clienDeals, ppomppuDeals, ruliwebDeals, naverDeals] = await Promise.all([
+        scrapeClien(),
+        scrapePpomppu(),
+        scrapeRuliweb(),
+        scrapeNaverShopping(),
+    ]);
 
-        const [clienDeals, ppomppuDeals, ruliwebDeals, naverDeals] = await Promise.all([
-            scrapeClien(),
-            scrapePpomppu(),
-            scrapeRuliweb(),
-            scrapeNaverShopping(),
-        ]);
+    const allDeals = interleaveDeals(clienDeals, ppomppuDeals, ruliwebDeals, naverDeals);
+    const sourceStats = {
+        클리앙: clienDeals.length,
+        뽐뿌: ppomppuDeals.length,
+        루리웹: ruliwebDeals.length,
+        네이버쇼핑: naverDeals.length,
+    };
 
-        // 소스별 균등 배분: 각 소스에서 번갈아가며 배치
-        const allDeals = interleaveDeals(clienDeals, ppomppuDeals, ruliwebDeals, naverDeals);
-        const sourceStats = {
-            클리앙: clienDeals.length,
-            뽐뿌: ppomppuDeals.length,
-            루리웹: ruliwebDeals.length,
-            네이버쇼핑: naverDeals.length,
-        };
+    if (allDeals.length === 0) return;
 
-        if (allDeals.length === 0) {
-            return NextResponse.json({ success: true, added: [], sourceStats, message: "수집된 게시글 없음" });
-        }
+    const results: string[] = [];
+    const MAX_NEW_PER_RUN = 15;
+    let newProcessed = 0;
 
-        const results: string[] = [];
-        let dedupCount = 0;
-        let gptFilterCount = 0;
-        let gptErrorCount = 0;
-        let discountFilterCount = 0;
-        let lastError = "";
-        const MAX_NEW_PER_RUN = 15; // 타임아웃 방지: 신규 아이템 최대 15개씩 처리
-        let newProcessed = 0;
+    for (const deal of allDeals) {
+        if (newProcessed >= MAX_NEW_PER_RUN) break;
+        const exists = await prisma.product.findFirst({ where: { sourceUrl: deal.link } });
+        if (exists) continue;
+        newProcessed++;
 
-        for (const deal of allDeals) {
-            if (newProcessed >= MAX_NEW_PER_RUN) break;
-            const exists = await prisma.product.findFirst({ where: { sourceUrl: deal.link } });
-            if (exists) { dedupCount++; continue; }
-            newProcessed++;
-
-            // Claude: IT 핫딜 여부 판별
-            let aiData: any = {};
-            try {
-                const message = await anthropic.messages.create({
-                    model: "claude-sonnet-4-6",
-                    max_tokens: 1000,
-                    system: `IT·가전·스마트홈 핫딜 전문 큐레이터. 아래 두 조건을 모두 충족해야만 등록.
+        // Claude: IT 핫딜 여부 판별
+        let aiData: any = {};
+        try {
+            const message = await anthropic.messages.create({
+                model: "claude-sonnet-4-6",
+                max_tokens: 1000,
+                system: `IT·가전·스마트홈 핫딜 전문 큐레이터. 아래 두 조건을 모두 충족해야만 등록.
 
 [등록 가능 제품군]
 - IT/전자기기: 노트북, 스마트폰, 태블릿, 모니터, 이어폰, 키보드, 마우스, SSD, 그래픽카드 등
@@ -490,123 +470,113 @@ export async function GET(request: Request) {
 반드시 JSON만 반환. 조건 미충족: {"isIT":false}
 조건 충족 시:
 {"isIT":true,"refinedTitle":"가격 혜택 강조 제목(50자이내)","category":"Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄(예:20%할인/역대최저/오늘만특가)","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"500자이상 상세설명"}`,
-                    messages: [
-                        { role: "user", content: `출처:${deal.source} 제목:${deal.title}` },
-                    ],
-                });
-                const block = message.content[0];
-                if (block.type !== "text") throw new Error("unexpected content type");
-                // Claude가 JSON 외 텍스트를 포함할 수 있으므로 JSON 부분만 추출
-                const raw = block.text.trim();
-                const jsonMatch = raw.match(/\{[\s\S]*\}/);
-                if (!jsonMatch) throw new Error("no JSON in response");
-                aiData = JSON.parse(jsonMatch[0]);
-            } catch (e: any) {
-                gptErrorCount++;
-                lastError = e?.message || String(e);
-                continue;
-            }
-
-            if (!aiData.isIT) { gptFilterCount++; continue; }
-
-            // ── 할인 정보 검증 ────────────────────────────────────
-            // 가격 정보도 없고 할인 설명도 없으면 정가 판매 → 제외
-            const _origCheck = Number(aiData.originalPrice) || 0;
-            const _saleCheck = Number(aiData.salePrice) || 0;
-            const _hasDiscount = _origCheck > 0 || _saleCheck > 0 || !!aiData.discountInfo;
-            if (!_hasDiscount) { discountFilterCount++; continue; }
-
-            // ── 이미지 + 쇼핑몰 링크 처리 ────────────────────────
-            const referer = `https://${new URL(deal.link).hostname}/`;
-            let affiliateLink = deal.link;
-            // 네이버쇼핑 API 이미지는 CDN → 바로 사용
-            let imageUrl: string | null = deal.imageUrl || null;
-
-            if (!isShopLink(deal.link)) {
-                // 커뮤니티 포스트 → 쇼핑몰 링크 추출
-                const shopLink = await fetchShopLink(deal.link, referer);
-                affiliateLink = shopLink || deal.link;
-
-                // 쇼핑몰 링크가 있으면 해당 상품 페이지에서 이미지 추출
-                // 커뮤니티 사이트 이미지는 핫링크 차단 → 사용 안 함
-                if (shopLink && !imageUrl) {
-                    imageUrl = await fetchShopImage(shopLink);
-                }
-            } else if (!imageUrl) {
-                // 이미 쇼핑몰 링크인 경우 상품 페이지 이미지
-                imageUrl = await fetchShopImage(deal.link);
-            }
-
-            affiliateLink = toCoupangAffiliateLink(affiliateLink);
-
-            // 이미지 최종 폴백: 모든 방법 실패 시 네이버 쇼핑 API로 검색
-            if (!imageUrl) {
-                imageUrl = await fetchNaverFallbackImage(deal.title);
-            }
-
-            const originalPrice = Number(aiData.originalPrice) || 0;
-            const salePrice = Number(aiData.salePrice) || 0;
-
-            // ── 2. 가격 이상 감지 ─────────────────────────────────
-            // 할인가 > 정가: AI가 원가/할인가를 반대로 파악한 경우
-            if (originalPrice > 0 && salePrice > 0 && salePrice > originalPrice) continue;
-            // 비정상적으로 낮은 가격: 1원·100원 등 오류값 (IT 제품은 최소 5,000원 이상)
-            if (salePrice > 0 && salePrice < 5000) continue;
-            // 비현실적 할인율: 97% 이상이면 가격 파싱 오류로 간주
-            if (originalPrice > 0 && salePrice > 0) {
-                const calcDiscount = Math.round(((originalPrice - salePrice) / originalPrice) * 100);
-                if (calcDiscount > 96) continue;
-            }
-
-            const discountPercent = originalPrice > 0 && salePrice > 0 && originalPrice > salePrice
-                ? Math.round(((originalPrice - salePrice) / originalPrice) * 100)
-                : 0;
-
-            const newProduct = await prisma.product.create({
-                data: {
-                    title: aiData.refinedTitle || deal.title,
-                    slug: generateSlug(deal.title),
-                    imageUrl: imageUrl || undefined,
-                    originalPrice,
-                    salePrice,
-                    discountPercent,
-                    category: aiData.category || "기타",
-                    mallName: deal.mallName,
-                    sourceUrl: deal.link,
-                    aiSummary: aiData.discountInfo
-                        ? `[${aiData.discountInfo}] ${aiData.aiSummary || ""}`.trim()
-                        : aiData.aiSummary || "",
-                    aiPros: aiData.aiPros || "",
-                    aiTarget: aiData.aiTarget || "",
-                    seoContent: aiData.seoContent || "",
-                    affiliateLink,
-                    isActive: true,
-                },
+                messages: [
+                    { role: "user", content: `출처:${deal.source} 제목:${deal.title}` },
+                ],
             });
-            results.push(`[${deal.source}] ${newProduct.title} | https://ithotdealab.com/deal/${newProduct.id}`);
+            const block = message.content[0];
+            if (block.type !== "text") throw new Error("unexpected content type");
+            const raw = block.text.trim();
+            const jsonMatch = raw.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) throw new Error("no JSON in response");
+            aiData = JSON.parse(jsonMatch[0]);
+        } catch {
+            continue;
         }
 
-        // 새 딜이 있으면 텔레그램 알림 전송
-        await sendTelegramAlert(results);
+        if (!aiData.isIT) continue;
 
-        // ── 모니터링: 커뮤니티 소스 0개 또는 활성 딜 부족 감지 ──
-        const communitySources = ["클리앙", "뽐뿌", "루리웹"];
-        const hasBrokenSource = communitySources.some(src => (sourceStats as any)[src] === 0);
-        const totalActive = await prisma.product.count({ where: { isActive: true } });
-        if (hasBrokenSource || totalActive < 5) {
-            await sendTelegramMonitorAlert(sourceStats, totalActive);
+        const _origCheck = Number(aiData.originalPrice) || 0;
+        const _saleCheck = Number(aiData.salePrice) || 0;
+        const _hasDiscount = _origCheck > 0 || _saleCheck > 0 || !!aiData.discountInfo;
+        if (!_hasDiscount) continue;
+
+        const referer = `https://${new URL(deal.link).hostname}/`;
+        let affiliateLink = deal.link;
+        let imageUrl: string | null = deal.imageUrl || null;
+
+        if (!isShopLink(deal.link)) {
+            const shopLink = await fetchShopLink(deal.link, referer);
+            affiliateLink = shopLink || deal.link;
+            if (shopLink && !imageUrl) {
+                imageUrl = await fetchShopImage(shopLink);
+            }
+        } else if (!imageUrl) {
+            imageUrl = await fetchShopImage(deal.link);
         }
 
-        return NextResponse.json({
-            success: true,
-            added: results,
-            sourceStats,
-            expired: expired.count,
-            totalActive,
-            debug: { dedupCount, gptErrorCount, gptFilterCount, discountFilterCount, lastError },
+        affiliateLink = toCoupangAffiliateLink(affiliateLink);
+
+        if (!imageUrl) {
+            imageUrl = await fetchNaverFallbackImage(deal.title);
+        }
+
+        const originalPrice = Number(aiData.originalPrice) || 0;
+        const salePrice = Number(aiData.salePrice) || 0;
+
+        if (originalPrice > 0 && salePrice > 0 && salePrice > originalPrice) continue;
+        if (salePrice > 0 && salePrice < 5000) continue;
+        if (originalPrice > 0 && salePrice > 0) {
+            const calcDiscount = Math.round(((originalPrice - salePrice) / originalPrice) * 100);
+            if (calcDiscount > 96) continue;
+        }
+
+        const discountPercent = originalPrice > 0 && salePrice > 0 && originalPrice > salePrice
+            ? Math.round(((originalPrice - salePrice) / originalPrice) * 100)
+            : 0;
+
+        const newProduct = await prisma.product.create({
+            data: {
+                title: aiData.refinedTitle || deal.title,
+                slug: generateSlug(deal.title),
+                imageUrl: imageUrl || undefined,
+                originalPrice,
+                salePrice,
+                discountPercent,
+                category: aiData.category || "기타",
+                mallName: deal.mallName,
+                sourceUrl: deal.link,
+                aiSummary: aiData.discountInfo
+                    ? `[${aiData.discountInfo}] ${aiData.aiSummary || ""}`.trim()
+                    : aiData.aiSummary || "",
+                aiPros: aiData.aiPros || "",
+                aiTarget: aiData.aiTarget || "",
+                seoContent: aiData.seoContent || "",
+                affiliateLink,
+                isActive: true,
+            },
         });
-    } catch (error: any) {
-        console.error("Scrape Error:", error);
-        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+        results.push(`[${deal.source}] ${newProduct.title} | https://ithotdealab.com/deal/${newProduct.id}`);
     }
+
+    await sendTelegramAlert(results);
+
+    const communitySources = ["클리앙", "뽐뿌", "루리웹"];
+    const hasBrokenSource = communitySources.some(src => (sourceStats as any)[src] === 0);
+    const totalActive = await prisma.product.count({ where: { isActive: true } });
+    if (hasBrokenSource || totalActive < 5) {
+        await sendTelegramMonitorAlert(sourceStats, totalActive);
+    }
+
+    console.log("Scrape done:", { expired: expired.count, added: results.length, sourceStats });
+}
+
+export async function GET(request: Request) {
+    // CRON_SECRET 인증 (설정된 경우에만 검증)
+    const cronSecret = process.env.CRON_SECRET;
+    if (cronSecret) {
+        const auth = request.headers.get("authorization");
+        if (auth !== `Bearer ${cronSecret}`) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+    }
+
+    if (!process.env.ANTHROPIC_API_KEY) {
+        return NextResponse.json({ error: "ANTHROPIC_API_KEY 환경변수 미설정" }, { status: 500 });
+    }
+
+    // 즉시 202 응답 후 백그라운드에서 크롤링 처리 (cron-job.org 30초 타임아웃 우회)
+    waitUntil(runScrape().catch(err => console.error("Scrape Error:", err)));
+
+    return NextResponse.json({ accepted: true, message: "수집 시작됨 (백그라운드 처리)" }, { status: 202 });
 }
