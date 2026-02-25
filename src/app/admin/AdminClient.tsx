@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 type Product = {
     id: string;
@@ -15,12 +15,41 @@ type Product = {
 };
 
 export default function AdminClient({ initialProducts }: { initialProducts: Product[] }) {
+    const [authed, setAuthed] = useState<boolean | null>(null);
+    const [pw, setPw] = useState("");
+    const [pwError, setPwError] = useState(false);
+    const [pwLoading, setPwLoading] = useState(false);
+
     const [products, setProducts] = useState(initialProducts);
     const [scrapeStatus, setScrapeStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
     const [scrapeResult, setScrapeResult] = useState<string>("");
     const [linkUpdateStatus, setLinkUpdateStatus] = useState<"idle" | "loading" | "done">("idle");
     const [imageUpdateStatus, setImageUpdateStatus] = useState<"idle" | "loading" | "done">("idle");
     const [imageUpdateResult, setImageUpdateResult] = useState<string>("");
+
+    // 탭별 sessionStorage로 인증 상태 확인 (탭/창 닫으면 초기화)
+    useEffect(() => {
+        setAuthed(sessionStorage.getItem("admin-auth") === "1");
+    }, []);
+
+    const handleLogin = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setPwLoading(true);
+        setPwError(false);
+        const res = await fetch("/api/admin/auth", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password: pw }),
+        });
+        if (res.ok) {
+            sessionStorage.setItem("admin-auth", "1");
+            setAuthed(true);
+        } else {
+            setPwError(true);
+            setPw("");
+        }
+        setPwLoading(false);
+    };
 
     // 크롤링 수동 실행
     const handleScrape = async () => {
@@ -34,7 +63,6 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
                 const expiredMsg = data.expired > 0 ? ` / 만료 ${data.expired}개 삭제` : "";
                 setScrapeResult(added.length > 0 ? `✅ ${added.length}개 추가됨: ${added.join(", ")}${expiredMsg}` : `✅ 새로운 IT 핫딜 없음${expiredMsg}`);
                 setScrapeStatus("done");
-                // 목록 새로고침
                 const r2 = await fetch("/api/admin/products");
                 const newList = await r2.json();
                 setProducts(newList);
@@ -48,7 +76,6 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
         }
     };
 
-    // 기존 클리앙 링크를 실제 쇼핑몰 링크로 업데이트
     const handleUpdateLinks = async () => {
         setLinkUpdateStatus("loading");
         try {
@@ -62,7 +89,6 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
         }
     };
 
-    // 이미지 없는 상품에 이미지 채우기
     const handleUpdateImages = async () => {
         setImageUpdateStatus("loading");
         setImageUpdateResult("");
@@ -85,12 +111,101 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
         }
     };
 
-    // 상품 삭제
     const handleDelete = async (id: string) => {
         if (!confirm("이 핫딜을 삭제하시겠습니까?")) return;
         await fetch(`/api/admin/products?id=${id}`, { method: "DELETE" });
         setProducts(prev => prev.filter(p => p.id !== id));
     };
+
+    // SSR 직후 깜빡임 방지
+    if (authed === null) return null;
+
+    // 비밀번호 입력창
+    if (!authed) {
+        return (
+            <div style={{
+                minHeight: "100vh",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "var(--background)",
+            }}>
+                <div style={{
+                    width: "100%",
+                    maxWidth: 360,
+                    padding: "40px 32px",
+                    background: "var(--surface)",
+                    borderRadius: 16,
+                    border: "1px solid var(--border)",
+                    boxShadow: "0 4px 24px rgba(0,0,0,0.08)",
+                }}>
+                    <div style={{ textAlign: "center", marginBottom: 24 }}>
+                        <div style={{
+                            width: 56, height: 56,
+                            background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                            borderRadius: 14,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: 28,
+                            marginBottom: 16,
+                        }}>
+                            ⚡
+                        </div>
+                        <h1 style={{ fontSize: 20, fontWeight: 900, color: "var(--foreground)", marginBottom: 6 }}>
+                            관리자 로그인
+                        </h1>
+                        <p style={{ fontSize: 13, color: "var(--muted)" }}>IT핫딜랩 어드민 페이지</p>
+                    </div>
+                    <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                        <input
+                            type="password"
+                            value={pw}
+                            onChange={e => setPw(e.target.value)}
+                            placeholder="비밀번호 입력"
+                            autoFocus
+                            style={{
+                                width: "100%",
+                                padding: "12px 16px",
+                                borderRadius: 10,
+                                border: `1.5px solid ${pwError ? "#ef4444" : "var(--border)"}`,
+                                background: "var(--surface2)",
+                                fontSize: 16,
+                                color: "var(--foreground)",
+                                outline: "none",
+                                boxSizing: "border-box",
+                                letterSpacing: "0.2em",
+                            }}
+                        />
+                        {pwError && (
+                            <p style={{ fontSize: 13, color: "#ef4444", fontWeight: 600, margin: 0 }}>
+                                비밀번호가 올바르지 않습니다.
+                            </p>
+                        )}
+                        <button
+                            type="submit"
+                            disabled={pwLoading || !pw}
+                            style={{
+                                width: "100%",
+                                padding: "12px",
+                                borderRadius: 10,
+                                background: "var(--primary)",
+                                color: "white",
+                                fontSize: 15,
+                                fontWeight: 800,
+                                border: "none",
+                                cursor: pwLoading || !pw ? "not-allowed" : "pointer",
+                                opacity: pwLoading || !pw ? 0.6 : 1,
+                                transition: "opacity 0.15s",
+                            }}
+                        >
+                            {pwLoading ? "확인 중..." : "로그인"}
+                        </button>
+                    </form>
+                </div>
+            </div>
+        );
+    }
 
     const BROKEN_IMG_DOMAINS = ["clien.net", "ppomppu.co.kr"];
     const clienCount = products.filter(p => p.affiliateLink.includes("clien.net")).length;
@@ -183,7 +298,6 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
                     )}
                     {products.map(p => (
                         <div key={p.id} className="flex items-center gap-3 rounded-xl border border-gray-100 p-3 dark:border-white/5">
-                            {/* 이미지 썸네일 */}
                             {(() => {
                                 const isBroken = p.imageUrl && BROKEN_IMG_DOMAINS.some(d => p.imageUrl!.includes(d));
                                 return (

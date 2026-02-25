@@ -9,18 +9,5 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false }, { status: 401 });
     }
 
-    const response = NextResponse.json({ success: true });
-    response.cookies.set("admin-auth", "authenticated", {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        path: "/",
-    });
-    return response;
-}
-
-export async function DELETE() {
-    const response = NextResponse.json({ success: true });
-    response.cookies.delete("admin-auth");
-    return response;
+    return NextResponse.json({ success: true });
 }
