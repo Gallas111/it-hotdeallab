@@ -347,6 +347,9 @@ async function scrapeNaverShopping(): Promise<RawDeal[]> {
         "노트북 할인", "모니터 특가", "무선이어폰 최저가", "SSD 할인",
         "키보드 마우스 할인", "스마트폰 특가", "태블릿 할인",
         "그래픽카드 특가", "스마트워치 할인", "충전기 멀티탭 할인",
+        "공기청정기 특가", "로봇청소기 할인", "스마트TV 최저가",
+        "냉장고 특가", "세탁기 할인", "에어컨 최저가",
+        "블루투스스피커 할인", "전기면도기 특가", "드라이어 고데기 할인", "전동칫솔 특가",
     ];
     const seen = new Set<string>();
     const deals: RawDeal[] = [];
@@ -442,7 +445,7 @@ export async function GET() {
         let gptErrorCount = 0;
         let discountFilterCount = 0;
         let lastError = "";
-        const MAX_NEW_PER_RUN = 10; // 타임아웃 방지: 신규 아이템 최대 10개씩 처리
+        const MAX_NEW_PER_RUN = 15; // 타임아웃 방지: 신규 아이템 최대 15개씩 처리
         let newProcessed = 0;
 
         for (const deal of allDeals) {
@@ -457,21 +460,27 @@ export async function GET() {
                 const message = await anthropic.messages.create({
                     model: "claude-sonnet-4-6",
                     max_tokens: 1000,
-                    system: `IT/가전 핫딜 전문 큐레이터. 아래 두 조건을 모두 충족해야만 등록.
+                    system: `IT·가전·스마트홈 핫딜 전문 큐레이터. 아래 두 조건을 모두 충족해야만 등록.
+
+[등록 가능 제품군]
+- IT/전자기기: 노트북, 스마트폰, 태블릿, 모니터, 이어폰, 키보드, 마우스, SSD, 그래픽카드 등
+- 가전제품: TV, 냉장고, 세탁기, 에어컨, 공기청정기, 로봇청소기, 건조기, 식기세척기 등
+- 스마트홈/IoT: 스마트워치, 블루투스스피커, 스마트조명, 홈캠, 도어락 등
+- 생활가전: 드라이어, 고데기, 전동칫솔, 전기면도기, 커피머신, 청소기 등
 
 [등록 조건 - 반드시 둘 다 충족]
-1. IT/전자기기/가전 제품 (노트북, 스마트폰, 모니터, 이어폰, 키보드 등 하드웨어)
-2. 실질적 가격 혜택 존재: 정가 대비 할인, 기간한정 특가, 역대최저가, 쿠폰/카드 할인가 등
+1. 위 제품군에 해당하는 전자/가전/스마트 기기
+2. 실질적 가격 혜택: 정가 대비 할인, 기간한정 특가, 역대최저가, 쿠폰/카드 할인가 등
 
-[제외 항목 - 하나라도 해당하면 false]
+[제외 항목]
 - 단순 제품 소개·리뷰·추천글 (할인 없음)
 - 정가 그대로 판매
-- 소프트웨어·게임·구독 서비스 (하드웨어만 허용)
-- 중고/리퍼라도 특별 할인이 없으면 제외
+- 소프트웨어·게임·구독 서비스
+- 식품·의류·생활용품 등 전자/가전과 무관한 제품
 
 반드시 JSON만 반환. 조건 미충족: {"isIT":false}
 조건 충족 시:
-{"isIT":true,"refinedTitle":"가격 혜택 강조 제목(50자이내)","category":"Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄(예:20%할인/역대최저/오늘만특가)","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"500자이상 상세설명"}`,
+{"isIT":true,"refinedTitle":"가격 혜택 강조 제목(50자이내)","category":"Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄(예:20%할인/역대최저/오늘만특가)","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"500자이상 상세설명"}`,
                     messages: [
                         { role: "user", content: `출처:${deal.source} 제목:${deal.title}` },
                     ],
