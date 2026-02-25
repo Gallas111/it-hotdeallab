@@ -9,6 +9,7 @@ const CATEGORIES = [
     { label: "💻 노트북/PC", value: "노트북/PC" },
     { label: "🖥 모니터/주변기기", value: "모니터/주변기기" },
     { label: "🎧 음향/스마트기기", value: "음향/스마트기기" },
+    { label: "🏠 생활가전", value: "생활가전" },
 ];
 
 export default function CategoryFilter() {
