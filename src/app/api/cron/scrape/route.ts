@@ -290,7 +290,7 @@ async function scrapePpomppu(): Promise<RawDeal[]> {
 async function scrapeRuliweb(): Promise<RawDeal[]> {
     try {
         const { data: xml } = await axios.get(
-            "https://bbs.ruliweb.com/market/board/1020.rss",
+            "https://bbs.ruliweb.com/market/board/1020.rss/rss",
             {
                 headers: {
                     ...HEADERS,
