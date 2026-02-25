@@ -15,6 +15,11 @@ const SOURCE_CONFIG: Record<string, { url: string; funcName: string; referer: st
         funcName: "scrapeClien",
         referer: "https://www.clien.net/",
     },
+    "뽐뿌": {
+        url: "https://www.ppomppu.co.kr/rss.php?id=ppomppu",
+        funcName: "scrapePpomppu",
+        referer: "https://www.ppomppu.co.kr/",
+    },
     "루리웹": {
         url: "https://bbs.ruliweb.com/market/board/1020",
         funcName: "scrapeRuliweb",

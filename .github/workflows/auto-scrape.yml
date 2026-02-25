@@ -35,7 +35,7 @@ jobs:
           with open('/tmp/scrape_result.json') as f:
               data = json.load(f)
           stats = data.get('sourceStats', {})
-          community = ['클리앙', '루리웹']
+          community = ['클리앙', '뽐뿌', '루리웹']
           broken = [k for k in community if stats.get(k, -1) == 0]
           print(','.join(broken))
           ")

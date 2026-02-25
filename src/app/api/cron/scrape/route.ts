@@ -256,7 +256,36 @@ async function scrapeClien(): Promise<RawDeal[]> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 소스 2: 루리웹 핫딜 (RSS 피드 사용 - 봇 차단 우회)
+// 소스 2: 뽐뿌 핫딜 (RSS 피드 사용 - 봇 차단 우회)
+// ═══════════════════════════════════════════════════════════
+async function scrapePpomppu(): Promise<RawDeal[]> {
+    try {
+        const { data: xml } = await axios.get(
+            "https://www.ppomppu.co.kr/rss.php?id=ppomppu",
+            { headers: { ...HEADERS, Referer: "https://www.ppomppu.co.kr/" }, timeout: 10000 }
+        );
+        const $ = cheerio.load(xml, { xmlMode: true });
+        const deals: RawDeal[] = [];
+
+        $("item").each((i, el) => {
+            if (i >= 20) return;
+            const title = $(el).find("title").text().trim();
+            if (!title || title.length < 5) return;
+            let link = $(el).find("link").text().trim();
+            if (!link) link = $(el).find("guid").text().trim();
+            if (!link || !link.startsWith("http")) return;
+            const mallMatch = title.match(/\[([^\]]+)\]/);
+            deals.push({ title, link, mallName: mallMatch?.[1] || "뽐뿌", source: "뽐뿌" });
+        });
+
+        return deals;
+    } catch {
+        return [];
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 소스 3: 루리웹 핫딜 (RSS 피드 사용 - 봇 차단 우회)
 // ═══════════════════════════════════════════════════════════
 async function scrapeRuliweb(): Promise<RawDeal[]> {
     try {
@@ -288,47 +317,68 @@ async function scrapeRuliweb(): Promise<RawDeal[]> {
 
 
 // ═══════════════════════════════════════════════════════════
-// 소스 4: 네이버 쇼핑 API
+// 소스 5: 네이버 쇼핑 API (병렬 처리)
 // ═══════════════════════════════════════════════════════════
 async function scrapeNaverShopping(): Promise<RawDeal[]> {
     const clientId = process.env.NAVER_CLIENT_ID;
     const clientSecret = process.env.NAVER_CLIENT_SECRET;
     if (!clientId || !clientSecret) return [];
 
-    const queries = ["노트북 할인", "모니터 특가", "무선이어폰 최저가", "SSD 할인", "키보드 마우스 할인"];
-    const deals: RawDeal[] = [];
+    const queries = [
+        "노트북 할인", "모니터 특가", "무선이어폰 최저가", "SSD 할인",
+        "키보드 마우스 할인", "스마트폰 특가", "태블릿 할인",
+        "그래픽카드 특가", "스마트워치 할인", "충전기 멀티탭 할인",
+    ];
     const seen = new Set<string>();
+    const deals: RawDeal[] = [];
 
-    for (const query of queries) {
-        try {
-            const { data } = await axios.get("https://openapi.naver.com/v1/search/shop.json", {
+    // 병렬로 모든 쿼리 동시 요청
+    const results = await Promise.allSettled(
+        queries.map(query =>
+            axios.get("https://openapi.naver.com/v1/search/shop.json", {
                 params: { query, display: 5, sort: "sim" },
                 headers: {
                     "X-Naver-Client-Id": clientId,
                     "X-Naver-Client-Secret": clientSecret,
                 },
                 timeout: 5000,
-            });
+            })
+        )
+    );
 
-            for (const item of data.items || []) {
-                const link = item.link || item.mallUrl;
-                if (!link || seen.has(link)) continue;
-                seen.add(link);
-                const title = item.title?.replace(/<[^>]+>/g, "") || "";
-                if (!title) continue;
-                // 네이버 쇼핑 API 이미지는 CDN URL → 핫링크 없음
-                deals.push({
-                    title: `[${item.mallName || "네이버"}] ${title} ${item.lprice ? item.lprice + "원" : ""}`,
-                    link,
-                    mallName: item.mallName || "네이버쇼핑",
-                    source: "네이버쇼핑",
-                    imageUrl: normalizeImgUrl(item.image, link) || undefined,
-                });
-            }
-        } catch { /* 개별 쿼리 실패 시 건너뜀 */ }
+    for (const result of results) {
+        if (result.status !== "fulfilled") continue;
+        for (const item of result.value.data.items || []) {
+            const link = item.link || item.mallUrl;
+            if (!link || seen.has(link)) continue;
+            seen.add(link);
+            const title = item.title?.replace(/<[^>]+>/g, "") || "";
+            if (!title) continue;
+            // 네이버 쇼핑 API 이미지는 CDN URL → 핫링크 없음
+            deals.push({
+                title: `[${item.mallName || "네이버"}] ${title} ${item.lprice ? item.lprice + "원" : ""}`,
+                link,
+                mallName: item.mallName || "네이버쇼핑",
+                source: "네이버쇼핑",
+                imageUrl: normalizeImgUrl(item.image, link) || undefined,
+            });
+        }
     }
 
     return deals;
+}
+
+// ─── 소스별 균등 배분 (interleave) ──────────────────────────
+// 각 소스에서 1개씩 번갈아 배치해 특정 소스에 치우치지 않게 함
+function interleaveDeals(...sources: RawDeal[][]): RawDeal[] {
+    const result: RawDeal[] = [];
+    const maxLen = Math.max(...sources.map(s => s.length));
+    for (let i = 0; i < maxLen; i++) {
+        for (const src of sources) {
+            if (src[i]) result.push(src[i]);
+        }
+    }
+    return result;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -347,15 +397,18 @@ export async function GET() {
             where: { createdAt: { lt: threeDaysAgo } },
         });
 
-        const [clienDeals, ruliwebDeals, naverDeals] = await Promise.all([
+        const [clienDeals, ppomppuDeals, ruliwebDeals, naverDeals] = await Promise.all([
             scrapeClien(),
+            scrapePpomppu(),
             scrapeRuliweb(),
             scrapeNaverShopping(),
         ]);
 
-        const allDeals = [...clienDeals, ...ruliwebDeals, ...naverDeals];
+        // 소스별 균등 배분: 각 소스에서 번갈아가며 배치
+        const allDeals = interleaveDeals(clienDeals, ppomppuDeals, ruliwebDeals, naverDeals);
         const sourceStats = {
             클리앙: clienDeals.length,
+            뽐뿌: ppomppuDeals.length,
             루리웹: ruliwebDeals.length,
             네이버쇼핑: naverDeals.length,
         };
@@ -370,7 +423,7 @@ export async function GET() {
         let gptErrorCount = 0;
         let discountFilterCount = 0;
         let lastError = "";
-        const MAX_NEW_PER_RUN = 6; // 타임아웃 방지: 신규 아이템 최대 6개씩 처리
+        const MAX_NEW_PER_RUN = 10; // 타임아웃 방지: 신규 아이템 최대 10개씩 처리
         let newProcessed = 0;
 
         for (const deal of allDeals) {
@@ -500,7 +553,7 @@ export async function GET() {
         await sendTelegramAlert(results);
 
         // ── 모니터링: 커뮤니티 소스 0개 또는 활성 딜 부족 감지 ──
-        const communitySources = ["클리앙", "루리웹"];
+        const communitySources = ["클리앙", "뽐뿌", "루리웹"];
         const hasBrokenSource = communitySources.some(src => (sourceStats as any)[src] === 0);
         const totalActive = await prisma.product.count({ where: { isActive: true } });
         if (hasBrokenSource || totalActive < 5) {
