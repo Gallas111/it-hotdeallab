@@ -148,6 +148,39 @@ async function sendTelegramAlert(newDeals: string[]) {
     } catch { /* 알림 실패는 무시 */ }
 }
 
+// ─── 네이버 쇼핑 API 이미지 폴백 ────────────────────────────
+// 쇼핑몰 og:image 수집 실패 시 네이버 CDN 이미지로 대체 (핫링크 차단 없음)
+async function fetchNaverFallbackImage(title: string): Promise<string | null> {
+    const clientId = process.env.NAVER_CLIENT_ID;
+    const clientSecret = process.env.NAVER_CLIENT_SECRET;
+    if (!clientId || !clientSecret) return null;
+
+    // 제목에서 쇼핑몰명·가격 제거하고 핵심 키워드만 추출
+    const keyword = title
+        .replace(/\[.*?\]/g, "")
+        .replace(/[0-9,]+원/g, "")
+        .replace(/[^\w\s가-힣]/g, " ")
+        .trim()
+        .substring(0, 30);
+
+    if (keyword.length < 3) return null;
+
+    try {
+        const { data } = await axios.get("https://openapi.naver.com/v1/search/shop.json", {
+            params: { query: keyword, display: 1 },
+            headers: {
+                "X-Naver-Client-Id": clientId,
+                "X-Naver-Client-Secret": clientSecret,
+            },
+            timeout: 5000,
+        });
+        const img = data.items?.[0]?.image;
+        return normalizeImgUrl(img, "https://shopping.naver.com") || null;
+    } catch {
+        return null;
+    }
+}
+
 // ─── 텔레그램 모니터링 경고 ──────────────────────────────────
 async function sendTelegramMonitorAlert(sourceStats: Record<string, number>, totalDeals: number) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -415,6 +448,11 @@ export async function GET() {
             }
 
             affiliateLink = toCoupangAffiliateLink(affiliateLink);
+
+            // 이미지 최종 폴백: 모든 방법 실패 시 네이버 쇼핑 API로 검색
+            if (!imageUrl) {
+                imageUrl = await fetchNaverFallbackImage(deal.title);
+            }
 
             const originalPrice = Number(aiData.originalPrice) || 0;
             const salePrice = Number(aiData.salePrice) || 0;
