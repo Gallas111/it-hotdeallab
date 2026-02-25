@@ -90,7 +90,7 @@ export async function POST(request: Request) {
         // ── 4. Claude에게 수정 코드 요청 ────────────────────────────
         const anthropic = new Anthropic({ apiKey: anthropicKey });
         const message = await anthropic.messages.create({
-            model: "claude-opus-4-6",
+            model: "claude-sonnet-4-6",
             max_tokens: 2000,
             messages: [{
                 role: "user",
