@@ -331,6 +331,8 @@ export async function GET() {
         const results: string[] = [];
         let dedupCount = 0;
         let gptFilterCount = 0;
+        let gptErrorCount = 0;
+        let discountFilterCount = 0;
 
         for (const deal of allDeals) {
             const exists = await prisma.product.findFirst({ where: { sourceUrl: deal.link } });
@@ -366,7 +368,9 @@ export async function GET() {
                     max_tokens: 1000,
                 });
                 aiData = JSON.parse(completion.choices[0].message.content || "{}");
-            } catch {
+            } catch (e: any) {
+                gptErrorCount++;
+                console.error("GPT Error:", e?.message || e);
                 continue;
             }
 
@@ -377,7 +381,7 @@ export async function GET() {
             const _origCheck = Number(aiData.originalPrice) || 0;
             const _saleCheck = Number(aiData.salePrice) || 0;
             const _hasDiscount = _origCheck > 0 || _saleCheck > 0 || !!aiData.discountInfo;
-            if (!_hasDiscount) continue;
+            if (!_hasDiscount) { discountFilterCount++; continue; }
 
             // ── 이미지 + 쇼핑몰 링크 처리 ────────────────────────
             const referer = `https://${new URL(deal.link).hostname}/`;
@@ -461,7 +465,7 @@ export async function GET() {
             sourceStats,
             expired: expired.count,
             totalActive,
-            debug: { dedupCount, gptFilterCount },
+            debug: { dedupCount, gptErrorCount, gptFilterCount, discountFilterCount },
         });
     } catch (error: any) {
         console.error("Scrape Error:", error);
