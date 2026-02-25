@@ -156,28 +156,36 @@ async function searchNaverWeb(productId: string): Promise<string> {
     return "";
 }
 
-// Naver Shopping으로 이미지+가격 조회
-async function searchNaverShopping(query: string): Promise<{ image: string | null; price: string; title: string }> {
+// Naver Shopping에서 쿠팡 전용 리스팅 우선 조회
+async function searchNaverShopping(query: string): Promise<{
+    image: string | null; price: string; originalPrice: string; title: string;
+}> {
     const id = process.env.NAVER_CLIENT_ID;
     const secret = process.env.NAVER_CLIENT_SECRET;
-    if (!id || !secret || !query) return { image: null, price: "", title: "" };
+    if (!id || !secret || !query) return { image: null, price: "", originalPrice: "", title: "" };
     try {
         const { data } = await axios.get("https://openapi.naver.com/v1/search/shop.json", {
-            params: { query, display: 1, sort: "sim" },
+            params: { query, display: 10, sort: "sim" },
             headers: { "X-Naver-Client-Id": id, "X-Naver-Client-Secret": secret },
             timeout: 5000,
         });
-        const item = data.items?.[0];
-        if (!item) return { image: null, price: "", title: "" };
+        const items: any[] = data.items || [];
+        // 쿠팡 리스팅 우선, 없으면 첫 번째
+        const item = items.find(i =>
+            i.mallName?.includes("쿠팡") || (i.link || "").includes("coupang.com")
+        ) ?? items[0];
+        if (!item) return { image: null, price: "", originalPrice: "", title: "" };
         const img = item.image;
-        const shoppingTitle = item.title?.replace(/<[^>]+>/g, "").trim() || "";
+        const lprice = item.lprice || "";
+        const hprice = Number(item.hprice) > Number(item.lprice) ? item.hprice : "";
         return {
             image: img ? (img.startsWith("//") ? "https:" + img : img) : null,
-            price: item.lprice || "",
-            title: shoppingTitle,
+            price: lprice,
+            originalPrice: hprice,
+            title: item.title?.replace(/<[^>]+>/g, "").trim() || "",
         };
     } catch {
-        return { image: null, price: "", title: "" };
+        return { image: null, price: "", originalPrice: "", title: "" };
     }
 }
 
@@ -204,18 +212,19 @@ export async function POST(request: Request) {
         }
         console.log(`[manual-deal] title from naver web: "${pageTitle}"`);
 
-        // 4. Naver Shopping으로 이미지+가격 (상품명으로 검색)
+        // 4. Naver Shopping으로 이미지+가격 (쿠팡 리스팅 우선)
         let imageUrl: string | null = null;
         let rawPrice = "";
+        let rawOriginalPrice = "";
         if (pageTitle) {
             const shop = await searchNaverShopping(pageTitle);
             imageUrl = shop.image;
             rawPrice = shop.price;
-            // 웹검색 결과가 없었으면 쇼핑 결과 제목 사용
+            rawOriginalPrice = shop.originalPrice;
             if (!pageTitle && shop.title) pageTitle = shop.title;
         }
 
-        console.log(`[manual-deal] image="${imageUrl?.substring(0, 60)}" price="${rawPrice}"`);
+        console.log(`[manual-deal] image="${imageUrl?.substring(0, 60)}" price="${rawPrice}" origPrice="${rawOriginalPrice}"`);
 
         // 파트너스 링크 결정
         const finalLink = affiliateLink.includes("link.coupang.com")
@@ -239,7 +248,7 @@ export async function POST(request: Request) {
 {"refinedTitle":"제목(50자이내)","category":"골드박스|Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"300자이상 상세설명"}`,
             messages: [{
                 role: "user",
-                content: `상품명: ${pageTitle}\n가격: ${rawPrice ? rawPrice + "원" : "정보 없음"}\n링크: ${productUrl}`,
+                content: `상품명: ${pageTitle}\n현재가: ${rawPrice ? rawPrice + "원" : "정보 없음"}\n정가: ${rawOriginalPrice ? rawOriginalPrice + "원" : "정보 없음"}\n링크: ${productUrl}`,
             }],
         });
 

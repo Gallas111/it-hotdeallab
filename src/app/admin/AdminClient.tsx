@@ -30,6 +30,8 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
     const [manualStatus, setManualStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
     const [manualResult, setManualResult] = useState("");
     const [filterCategory, setFilterCategory] = useState("전체");
+    const [syncStatus, setSyncStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+    const [syncResult, setSyncResult] = useState("");
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editSale, setEditSale] = useState("");
     const [editOrig, setEditOrig] = useState("");
@@ -157,6 +159,27 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
         if (!confirm("이 핫딜을 삭제하시겠습니까?")) return;
         await fetch(`/api/admin/products?id=${id}`, { method: "DELETE" });
         setProducts(prev => prev.filter(p => p.id !== id));
+    };
+
+    const handleSyncPrices = async () => {
+        setSyncStatus("loading");
+        setSyncResult("");
+        try {
+            const res = await fetch("/api/admin/sync-prices", { method: "POST" });
+            const data = await res.json();
+            if (data.success) {
+                setSyncStatus("done");
+                setSyncResult(`✅ ${data.total}개 중 ${data.updated}개 가격 업데이트${data.changes?.length > 0 ? "\n" + data.changes.join("\n") : ""}`);
+                const r = await fetch("/api/admin/products");
+                setProducts(await r.json());
+            } else {
+                setSyncStatus("error");
+                setSyncResult(`❌ ${data.error}`);
+            }
+        } catch (e: any) {
+            setSyncStatus("error");
+            setSyncResult(`❌ 요청 실패: ${e.message}`);
+        }
     };
 
     const startEdit = (p: Product) => {
@@ -387,7 +410,19 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
                             {imageUpdateStatus === "loading" ? "⏳..." : imageUpdateStatus === "done" ? "✅ 완료" : `🖼 이미지 ${noImageCount}개`}
                         </button>
                     )}
+                    <button
+                        onClick={handleSyncPrices}
+                        disabled={syncStatus === "loading"}
+                        className="rounded-xl bg-orange-500 px-5 py-2.5 text-[13px] font-black text-white transition-all hover:opacity-80 disabled:opacity-50"
+                    >
+                        {syncStatus === "loading" ? "⏳ 가격 동기화 중..." : syncStatus === "done" ? "✅ 완료" : "💰 쿠팡 가격 동기화"}
+                    </button>
                 </div>
+                {syncResult && (
+                    <div className={`rounded-xl px-4 py-3 text-[12px] font-bold whitespace-pre-line ${syncStatus === "error" ? "bg-red-50 text-red-600" : "bg-orange-50 text-orange-700"}`}>
+                        {syncResult}
+                    </div>
+                )}
                 {scrapeResult && (
                     <div className={`rounded-xl px-4 py-3 text-[13px] font-bold ${scrapeStatus === "error" ? "bg-red-50 text-red-600" : "bg-green-50 text-green-700"}`}>
                         {scrapeResult}
