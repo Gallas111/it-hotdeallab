@@ -26,6 +26,7 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
 
     // 수동 등록
     const [manualLink, setManualLink] = useState("");
+    const [manualCategory, setManualCategory] = useState("골드박스");
     const [manualStatus, setManualStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
     const [manualResult, setManualResult] = useState("");
     const [linkUpdateStatus, setLinkUpdateStatus] = useState<"idle" | "loading" | "done">("idle");
@@ -125,7 +126,7 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
             const res = await fetch("/api/admin/manual-deal", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ affiliateLink: manualLink.trim() }),
+                body: JSON.stringify({ affiliateLink: manualLink.trim(), category: manualCategory }),
             });
             const data = await res.json();
             if (data.success) {
@@ -286,6 +287,19 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
                     </p>
                 </div>
                 <form onSubmit={handleManualRegister} className="flex gap-3 flex-wrap">
+                    <select
+                        value={manualCategory}
+                        onChange={e => setManualCategory(e.target.value)}
+                        className="rounded-xl border border-gray-200 px-4 py-3 text-[13px] font-bold text-[var(--foreground)] bg-[var(--surface2)] outline-none focus:border-yellow-400 dark:border-white/10 shrink-0"
+                    >
+                        <option value="골드박스">🥇 골드박스</option>
+                        <option value="Apple">🍎 Apple</option>
+                        <option value="삼성/LG">📺 삼성/LG</option>
+                        <option value="노트북/PC">💻 노트북/PC</option>
+                        <option value="모니터/주변기기">🖥 모니터/주변기기</option>
+                        <option value="음향/스마트기기">🎧 음향/스마트기기</option>
+                        <option value="생활가전">🏠 생활가전</option>
+                    </select>
                     <input
                         type="url"
                         value={manualLink}

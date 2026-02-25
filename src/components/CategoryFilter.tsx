@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 const CATEGORIES = [
     { label: "전체", value: "전체" },
+    { label: "🥇 골드박스", value: "골드박스" },
     { label: "🍎 Apple", value: "Apple" },
     { label: "📺 삼성/LG", value: "삼성/LG" },
     { label: "💻 노트북/PC", value: "노트북/PC" },

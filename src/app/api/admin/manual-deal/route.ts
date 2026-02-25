@@ -66,7 +66,7 @@ async function fetchProductInfo(url: string): Promise<{ title: string; imageUrl:
 
 export async function POST(request: Request) {
     try {
-        const { affiliateLink } = await request.json();
+        const { affiliateLink, category: forceCategory } = await request.json();
         if (!affiliateLink) {
             return NextResponse.json({ error: "affiliateLink 필요" }, { status: 400 });
         }
@@ -84,7 +84,7 @@ export async function POST(request: Request) {
             max_tokens: 1000,
             system: `IT·가전·스마트홈 핫딜 전문 큐레이터.
 반드시 JSON만 반환:
-{"refinedTitle":"가격 혜택 강조 제목(50자이내)","category":"Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄(예:20%할인/역대최저/오늘만특가)","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"500자이상 상세설명"}`,
+{"refinedTitle":"가격 혜택 강조 제목(50자이내)","category":"골드박스|Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄(예:20%할인/역대최저/오늘만특가)","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"500자이상 상세설명"}`,
             messages: [
                 { role: "user", content: `상품 URL: ${affiliateLink}\n상품명: ${pageTitle}\n가격정보: ${rawPrice}` },
             ],
@@ -112,7 +112,7 @@ export async function POST(request: Request) {
                 originalPrice,
                 salePrice,
                 discountPercent,
-                category: aiData.category || "기타",
+                category: forceCategory || aiData.category || "기타",
                 mallName,
                 sourceUrl: affiliateLink,
                 aiSummary: aiData.discountInfo
