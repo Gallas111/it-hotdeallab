@@ -123,37 +123,84 @@ async function resolveToProductUrl(startUrl: string): Promise<string> {
     return url;
 }
 
-// Naver 웹검색으로 Coupang 상품명 조회 (상품 ID 기반)
-async function searchNaverWeb(productId: string): Promise<string> {
+// 텍스트에서 할인율/정가 추출
+function parsePriceHints(text: string, salePrice: number): {
+    originalPrice: number;
+    discountPercent: number;
+} {
+    const pctMatch = text.match(/(\d+)%/g) || [];
+    const discountPercent = pctMatch
+        .map(s => parseInt(s))
+        .filter(n => n >= 5 && n <= 90)[0] || 0;
+
+    const priceMatches = text.match(/[\d,]+원/g) || [];
+    const prices = priceMatches
+        .map(s => parseInt(s.replace(/[,원]/g, "")))
+        .filter(n => n > 1000 && n < 10_000_000);
+
+    const higherPrices = prices.filter(p => p > salePrice * 1.05);
+    let originalPrice = higherPrices.length > 0 ? Math.min(...higherPrices) : 0;
+
+    if (originalPrice === 0 && discountPercent > 0 && salePrice > 0) {
+        const calc = Math.round(salePrice / (1 - discountPercent / 100) / 100) * 100;
+        if (calc > salePrice && calc < salePrice * 10) originalPrice = calc;
+    }
+
+    const computedDiscount = originalPrice > 0 && salePrice > 0
+        ? Math.round(((originalPrice - salePrice) / originalPrice) * 100)
+        : discountPercent;
+
+    return { originalPrice, discountPercent: computedDiscount };
+}
+
+// Naver 웹검색으로 Coupang 상품명 + 가격 힌트 조회 (상품 ID 기반)
+async function searchNaverWeb(productId: string): Promise<{
+    title: string;
+    originalPrice: number;
+    discountPercent: number;
+}> {
     const id = process.env.NAVER_CLIENT_ID;
     const secret = process.env.NAVER_CLIENT_SECRET;
-    if (!id || !secret || !productId) return "";
+    if (!id || !secret || !productId) return { title: "", originalPrice: 0, discountPercent: 0 };
     try {
         const { data } = await axios.get("https://openapi.naver.com/v1/search/webkr.json", {
             params: { query: `coupang.com/vp/products/${productId}`, display: 5 },
             headers: { "X-Naver-Client-Id": id, "X-Naver-Client-Secret": secret },
             timeout: 6000,
         });
+        let bestTitle = "";
+        let bestHints = { originalPrice: 0, discountPercent: 0 };
+
         for (const item of (data.items || [])) {
-            if ((item.link || "").includes(`/products/${productId}`)) {
-                const title = item.title
-                    .replace(/<[^>]+>/g, "")
-                    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-                    .replace(/\s*[:\-|]\s*쿠팡\s*$/i, "").trim();
-                if (title) return title;
+            const isProductPage = (item.link || "").includes(`/products/${productId}`);
+            const cleanTitle = item.title
+                .replace(/<[^>]+>/g, "")
+                .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+                .replace(/\s*[:\-|]\s*쿠팡\s*$/i, "").trim();
+
+            if (isProductPage && !bestTitle && cleanTitle) bestTitle = cleanTitle;
+
+            // 스니펫에서 가격 힌트 추출 (salePrice 모르므로 0으로 전달, 나중에 정제)
+            const text = [item.title, item.description].join(" ")
+                .replace(/<[^>]+>/g, "")
+                .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+            const hints = parsePriceHints(text, 0);
+            if ((hints.originalPrice > 0 || hints.discountPercent > 0) && bestHints.originalPrice === 0 && bestHints.discountPercent === 0) {
+                bestHints = hints;
             }
         }
-        // productId가 포함된 첫 결과라도 사용
-        const first = data.items?.[0];
-        if (first) {
-            return first.title
+
+        if (!bestTitle && data.items?.[0]) {
+            bestTitle = data.items[0].title
                 .replace(/<[^>]+>/g, "")
                 .replace(/&amp;/g, "&").replace(/\s*[:\-|]\s*쿠팡\s*$/i, "").trim();
         }
+
+        return { title: bestTitle, ...bestHints };
     } catch (e: any) {
         console.error("Naver webkr error:", e.message);
     }
-    return "";
+    return { title: "", originalPrice: 0, discountPercent: 0 };
 }
 
 // Naver Shopping에서 쿠팡 전용 리스팅 우선 조회
@@ -205,12 +252,17 @@ export async function POST(request: Request) {
         const productId = productIdMatch?.[1] || "";
         console.log(`[manual-deal] productId=${productId}`);
 
-        // 3. Naver 웹검색으로 상품명 조회
+        // 3. Naver 웹검색으로 상품명 + 가격 힌트 조회
         let pageTitle = "";
+        let webkrOriginalPrice = 0;
+        let webkrDiscountPercent = 0;
         if (productId) {
-            pageTitle = await searchNaverWeb(productId);
+            const webResult = await searchNaverWeb(productId);
+            pageTitle = webResult.title;
+            webkrOriginalPrice = webResult.originalPrice;
+            webkrDiscountPercent = webResult.discountPercent;
         }
-        console.log(`[manual-deal] title from naver web: "${pageTitle}"`);
+        console.log(`[manual-deal] title="${pageTitle}" webkrOrig=${webkrOriginalPrice} webkrDisc=${webkrDiscountPercent}%`);
 
         // 4. Naver Shopping으로 이미지+가격 (쿠팡 리스팅 우선)
         let imageUrl: string | null = null;
@@ -222,6 +274,11 @@ export async function POST(request: Request) {
             rawPrice = shop.price;
             rawOriginalPrice = shop.originalPrice;
             if (!pageTitle && shop.title) pageTitle = shop.title;
+        }
+
+        // hprice가 없으면 webkr에서 얻은 정가 사용
+        if (!rawOriginalPrice && webkrOriginalPrice > 0) {
+            rawOriginalPrice = String(webkrOriginalPrice);
         }
 
         console.log(`[manual-deal] image="${imageUrl?.substring(0, 60)}" price="${rawPrice}" origPrice="${rawOriginalPrice}"`);
@@ -248,7 +305,7 @@ export async function POST(request: Request) {
 {"refinedTitle":"제목(50자이내)","category":"골드박스|Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"300자이상 상세설명"}`,
             messages: [{
                 role: "user",
-                content: `상품명: ${pageTitle}\n현재가: ${rawPrice ? rawPrice + "원" : "정보 없음"}\n정가: ${rawOriginalPrice ? rawOriginalPrice + "원" : "정보 없음"}\n링크: ${productUrl}`,
+                content: `상품명: ${pageTitle}\n현재가: ${rawPrice ? rawPrice + "원" : "정보 없음"}\n정가: ${rawOriginalPrice ? rawOriginalPrice + "원" : "정보 없음"}${webkrDiscountPercent > 0 ? `\n할인율 힌트: ${webkrDiscountPercent}%` : ""}\n링크: ${productUrl}`,
             }],
         });
 
