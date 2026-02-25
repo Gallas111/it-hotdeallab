@@ -8,57 +8,20 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - name: IT 핫딜 자동 수집
         run: |
           echo "🔄 수집 시작: $(date -u '+%Y-%m-%d %H:%M UTC')"
           response=$(curl -s -o /tmp/scrape_result.json -w "%{http_code}" \
-            --max-time 120 \
+            --max-time 30 \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             "https://ithotdealab.com/api/cron/scrape")
           echo "HTTP Status: $response"
           cat /tmp/scrape_result.json
-          if [ "$response" != "200" ]; then
+          # 202: 백그라운드 처리 시작됨 (정상), 200: 즉시 완료 (정상)
+          if [ "$response" != "202" ] && [ "$response" != "200" ]; then
             echo "❌ 수집 실패 (status: $response)"
             exit 1
           fi
-          echo "✅ 수집 완료"
-
-      - name: 크롤러 이상 감지 및 Claude 자동 수정
-        if: success()
-        run: |
-          echo "🔍 소스별 수집 결과 분석 중..."
-
-          # 커뮤니티 소스 중 0개 반환한 소스 추출
-          broken=$(python3 -c "
-          import json, sys
-          with open('/tmp/scrape_result.json') as f:
-              data = json.load(f)
-          stats = data.get('sourceStats', {})
-          community = ['클리앙', '뽐뿌', '루리웹']
-          broken = [k for k in community if stats.get(k, -1) == 0]
-          print(','.join(broken))
-          ")
-
-          if [ -z "$broken" ]; then
-            echo "✅ 모든 소스 정상"
-            exit 0
-          fi
-
-          echo "⚠️ 이상 감지된 소스: $broken"
-          echo "🔧 Claude 자동 수정 시작..."
-
-          IFS=',' read -ra sources <<< "$broken"
-          for src in "${sources[@]}"; do
-            echo "→ $src 자동 수정 요청 중..."
-            repair_response=$(curl -s -o /tmp/repair_result.json -w "%{http_code}" \
-              --max-time 90 \
-              -X POST \
-              -H "Content-Type: application/json" \
-              -d "{\"source\":\"$src\"}" \
-              "https://ithotdealab.com/api/monitor/repair")
-            echo "수정 결과 ($src): HTTP $repair_response"
-            cat /tmp/repair_result.json
-            echo ""
-          done
+          echo "✅ 수집 요청 완료 (백그라운드 처리 중)"
