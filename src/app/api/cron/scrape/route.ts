@@ -291,7 +291,14 @@ async function scrapeRuliweb(): Promise<RawDeal[]> {
     try {
         const { data: xml } = await axios.get(
             "https://bbs.ruliweb.com/market/board/1020.rss",
-            { headers: { ...HEADERS, Referer: "https://bbs.ruliweb.com/" }, timeout: 10000 }
+            {
+                headers: {
+                    ...HEADERS,
+                    Referer: "https://bbs.ruliweb.com/",
+                    Accept: "application/rss+xml, text/xml, application/xml, */*",
+                },
+                timeout: 10000,
+            }
         );
         const $ = cheerio.load(xml, { xmlMode: true });
         const deals: RawDeal[] = [];
@@ -300,13 +307,25 @@ async function scrapeRuliweb(): Promise<RawDeal[]> {
             if (i >= 15) return;
             const title = $(el).find("title").text().trim();
             if (!title || title.length < 5) return;
-            let link = $(el).find("link").text().trim();
-            if (!link) link = $(el).find("guid").text().trim();
+
+            // cheerio가 <link>를 HTML void 요소로 처리할 수 있어 직접 정규식으로 추출
+            const itemXml = $.html(el);
+            const linkMatch = itemXml.match(/<link[^>]*>(.*?)<\/link>/is);
+            let link = linkMatch?.[1]?.trim()
+                || $(el).find("link").text().trim()
+                || $(el).find("guid").text().trim();
+
+            if (!link || !link.startsWith("http")) return;
             // RSS URL에 .rss가 섞인 경우 정리
             link = link.replace("/board/1020.rss/", "/board/1020/");
-            if (!link || !link.startsWith("http")) return;
+
+            // description CDATA에서 이미지 URL 추출
+            const desc = $(el).find("description").html() || "";
+            const imgMatch = desc.match(/src=["'](https?:\/\/[^"'\s]+\.(?:webp|jpe?g|png)[^"'\s]*?)["']/i);
+            const imageUrl = imgMatch?.[1] || undefined;
+
             const mallMatch = title.match(/\[([^\]]+)\]/);
-            deals.push({ title, link, mallName: mallMatch?.[1] || "루리웹", source: "루리웹" });
+            deals.push({ title, link, mallName: mallMatch?.[1] || "루리웹", source: "루리웹", imageUrl });
         });
 
         return deals;
