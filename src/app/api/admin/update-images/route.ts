@@ -113,8 +113,11 @@ async function fetchShopLink(postUrl: string): Promise<string | null> {
     }
 }
 
-export async function POST() {
+export async function POST(request: Request) {
     try {
+        const body = await request.json().catch(() => ({}));
+        const forceId: string | undefined = body.id;
+
         // Step 1: 핫링크 차단 도메인의 imageUrl을 null로 초기화
         let cleared = 0;
         for (const domain of BROKEN_IMAGE_DOMAINS) {
@@ -123,6 +126,14 @@ export async function POST() {
                 data: { imageUrl: null },
             });
             cleared += result.count;
+        }
+
+        // 특정 ID 강제 초기화 (잘못된 이미지 재수집용)
+        if (forceId) {
+            await prisma.product.update({
+                where: { id: forceId },
+                data: { imageUrl: null },
+            });
         }
 
         // Step 2: imageUrl이 없는 상품 처리 (최대 30개)
