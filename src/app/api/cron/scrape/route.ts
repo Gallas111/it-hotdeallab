@@ -103,8 +103,8 @@ async function fetchShopLink(postUrl: string, referer: string): Promise<string |
     }
 }
 
-// ─── 쇼핑몰 상품 페이지 og:image 추출 ────────────────────────
-// 쿠팡/11번가/지마켓 등 CDN 이미지 → 핫링크 없음, 실제 상품 사진
+// ─── 쇼핑몰 상품 페이지 이미지 추출 ──────────────────────────
+// 우선순위: 상품 메인 이미지 선택자 → og:image 순으로 시도
 async function fetchShopImage(shopUrl: string): Promise<string | null> {
     try {
         const { data: html } = await axios.get(shopUrl, {
@@ -114,18 +114,50 @@ async function fetchShopImage(shopUrl: string): Promise<string | null> {
         });
         const $ = cheerio.load(html);
 
-        // og:image 우선
-        const ogRaw = $('meta[property="og:image"]').attr("content")
-            || $('meta[name="og:image"]').attr("content");
-        const ogImg = normalizeImgUrl(ogRaw, shopUrl);
-        if (ogImg) return ogImg;
+        // 1. 주요 쇼핑몰 상품 메인 이미지 선택자 (실제 보이는 제품 이미지)
+        const productSelectors = [
+            // 쿠팡
+            ".prod-image__detail img",
+            "#repImage",
+            // 11번가
+            "#mainProductImage",
+            ".prd_img_area img",
+            // G마켓/옥션
+            "#itemImgArea img",
+            ".photo_slide img",
+            // SSG
+            ".prod_img img",
+            // 네이버 스마트스토어
+            ".main_image img",
+            "._1LeBnZqGbM img",
+            // 다나와
+            ".prod_img img",
+            "#imgArea img",
+            // 공통 패턴
+            '[class*="product-image"] img',
+            '[class*="main-image"] img',
+            '[class*="mainImage"] img',
+            '[id*="mainImage"]',
+            '[id*="productImage"]',
+        ];
 
-        // product 이미지 메타
-        const productImg = $('meta[property="product:image"]').attr("content");
-        const productNorm = normalizeImgUrl(productImg, shopUrl);
+        for (const selector of productSelectors) {
+            const src = $(selector).first().attr("src")
+                || $(selector).first().attr("data-src");
+            const img = normalizeImgUrl(src, shopUrl);
+            if (img && img.startsWith("http")) return img;
+        }
+
+        // 2. product 메타 이미지
+        const productMeta = $('meta[property="product:image"]').attr("content");
+        const productNorm = normalizeImgUrl(productMeta, shopUrl);
         if (productNorm) return productNorm;
 
-        return null;
+        // 3. og:image (마지막 폴백 - 기획전/배너 이미지 가능성 있음)
+        const ogRaw = $('meta[property="og:image"]').attr("content")
+            || $('meta[name="og:image"]').attr("content");
+        return normalizeImgUrl(ogRaw, shopUrl);
+
     } catch {
         return null;
     }

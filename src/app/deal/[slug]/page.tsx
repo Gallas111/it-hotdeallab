@@ -132,12 +132,16 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
                             )}
                         </div>
                     )}
-                    {p.salePrice > 0 && (
+                    {p.salePrice > 0 ? (
                         <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
                             <span style={{ fontSize: 32, fontWeight: 900, color: "var(--primary)", letterSpacing: "-0.04em" }}>
                                 {p.salePrice.toLocaleString()}
                             </span>
                             <span style={{ fontSize: 18, fontWeight: 700, color: "var(--primary)" }}>원</span>
+                        </div>
+                    ) : p.aiSummary && (
+                        <div style={{ fontSize: 16, fontWeight: 700, color: "var(--primary)", lineHeight: 1.5 }}>
+                            {p.aiSummary}
                         </div>
                     )}
                 </div>
