@@ -183,6 +183,16 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
                     {p.mallName}에서 구매하기
                 </a>
 
+                {/* 쿠팡 파트너스 공지 문구 (쿠팡 딜만 표시) */}
+                {(p.affiliateLink.includes("coupang.com")) && (
+                    <p style={{
+                        fontSize: 11, color: "var(--muted)", lineHeight: 1.7,
+                        marginTop: 10, textAlign: "center",
+                    }}>
+                        이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.
+                    </p>
+                )}
+
                 {/* 공유 버튼 */}
                 <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
                     <p style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", marginBottom: 10 }}>이 딜 공유하기</p>

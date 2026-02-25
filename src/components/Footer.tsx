@@ -9,7 +9,7 @@ export default function Footer() {
 
                 {/* 쿠팡 파트너스 배너 */}
                 <a
-                    href="https://www.coupang.com/np/search?q=IT+전자기기&partnerCode=AF5418862"
+                    href="https://link.coupang.com/a/dSUuBB"
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{
