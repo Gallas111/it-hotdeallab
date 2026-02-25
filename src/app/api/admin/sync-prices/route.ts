@@ -160,16 +160,17 @@ export async function POST() {
             const naver = naverResults[i];
             const direct = directMap.get(p.id);
 
-            // 가격 결정: Naver 우선, 없으면 ScraperAPI
-            const salePrice = naver?.salePrice || direct?.salePrice || 0;
+            // 가격 결정: ScraperAPI 우선 (실제 상품 페이지 직접 조회라 더 정확)
+            // Naver는 다른 묶음/변형 상품 가격을 가져올 수 있음
+            const salePrice = direct?.salePrice || naver?.salePrice || 0;
             if (salePrice === 0) continue;
 
-            // 정가: Naver 우선, 없으면 ScraperAPI
-            const originalPrice = (naver?.originalPrice || 0) > 0
-                ? naver!.originalPrice
-                : (direct?.originalPrice || 0);
+            // 정가: ScraperAPI 우선, 없으면 Naver
+            const originalPrice = (direct?.originalPrice || 0) > 0
+                ? direct!.originalPrice
+                : (naver?.originalPrice || 0);
 
-            const image = naver?.image || direct?.image || null;
+            const image = direct?.image || naver?.image || null;
 
             const discountPercent = originalPrice > 0 && originalPrice > salePrice
                 ? Math.round(((originalPrice - salePrice) / originalPrice) * 100)
