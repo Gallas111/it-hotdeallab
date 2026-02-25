@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import * as https from "node:https";
+import * as http from "node:http";
+import * as zlib from "node:zlib";
 import axios from "axios";
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
@@ -7,17 +10,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const BROWSER_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
-};
+const BROWSER_UA =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
 
 function generateSlug(title: string): string {
     const ascii = title.replace(/\[.*?\]/g, "").trim();
@@ -38,114 +32,157 @@ function toCoupangAffiliateLink(url: string): string {
     }
 }
 
-// link.coupang.com 단축 링크 → 실제 상품 URL 추출
-async function resolveShortLink(url: string): Promise<string> {
-    if (!url.includes("link.coupang.com")) return url;
-    try {
-        // 리다이렉트를 따르지 않고 Location 헤더만 추출
-        const r = await axios.get(url, {
-            headers: BROWSER_HEADERS,
-            maxRedirects: 0,
-            timeout: 10000,
-            validateStatus: (s) => s >= 200 && s < 400,
+// Node.js 내장 https 모듈로 단일 요청 (리다이렉트 안 따라감)
+function rawGet(url: string, extraHeaders: Record<string, string> = {}): Promise<{
+    status: number;
+    headers: Record<string, string | string[]>;
+    body: string;
+}> {
+    return new Promise((resolve, reject) => {
+        let parsed: URL;
+        try { parsed = new URL(url); } catch (e) { reject(e); return; }
+
+        const mod = parsed.protocol === "https:" ? https : http;
+        const options = {
+            hostname: parsed.hostname,
+            port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
+            path: parsed.pathname + parsed.search,
+            method: "GET",
+            headers: {
+                "User-Agent": BROWSER_UA,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "ko-KR,ko;q=0.9",
+                "Accept-Encoding": "gzip, deflate",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Upgrade-Insecure-Requests": "1",
+                ...extraHeaders,
+            },
+        };
+
+        const req = mod.request(options, (res) => {
+            const chunks: Buffer[] = [];
+            res.on("data", (c: Buffer) => chunks.push(c));
+            res.on("end", () => {
+                const buf = Buffer.concat(chunks);
+                const enc = ((res.headers["content-encoding"] as string) || "").toLowerCase();
+                const decode = (): Promise<string> =>
+                    new Promise((r, j) => {
+                        if (enc === "gzip") zlib.gunzip(buf, (e, d) => (e ? j(e) : r(d.toString("utf-8"))));
+                        else if (enc === "deflate") zlib.inflate(buf, (e, d) => (e ? j(e) : r(d.toString("utf-8"))));
+                        else r(buf.toString("utf-8"));
+                    });
+                decode()
+                    .then((body) =>
+                        resolve({ status: res.statusCode ?? 200, headers: res.headers as any, body })
+                    )
+                    .catch(reject);
+            });
         });
-        const location = r.headers["location"] as string | undefined;
-        if (location) {
-            return location.startsWith("http") ? location : `https://www.coupang.com${location}`;
-        }
-        // 리다이렉트가 없으면 HTML에서 추출 시도
-        const html: string = r.data || "";
-        const jsMatch = html.match(/(?:window\.location(?:\.href)?\s*=\s*|location\.replace\()["']([^"']+)/);
-        if (jsMatch) return jsMatch[1];
-        return url;
-    } catch (e: any) {
-        // 3xx 상태코드는 axios가 에러로 처리 — Location 헤더 추출
-        const location = e?.response?.headers?.["location"] as string | undefined;
-        if (location) {
-            return location.startsWith("http") ? location : `https://www.coupang.com${location}`;
-        }
-        return url;
-    }
+
+        req.on("error", reject);
+        req.setTimeout(15000, () => { req.destroy(); reject(new Error("Timeout")); });
+        req.end();
+    });
 }
 
-// 쿠팡 상품 페이지에서 og:title, og:image, 가격 추출
-async function fetchProductInfo(inputUrl: string): Promise<{
-    title: string; imageUrl: string | null; rawPrice: string; finalUrl: string;
+// 리다이렉트 체인을 직접 추적 (쿠키 수집 포함)
+async function fetchFollowingRedirects(startUrl: string): Promise<{
+    body: string; finalUrl: string;
 }> {
-    // 단축링크 → 실제 URL 변환
-    const productUrl = await resolveShortLink(inputUrl);
-    console.log("[manual-deal] productUrl:", productUrl);
+    let url = startUrl;
+    const cookies: string[] = [];
 
-    try {
-        const response = await axios.get(productUrl, {
-            headers: {
-                ...BROWSER_HEADERS,
-                Referer: "https://www.coupang.com/",
-            },
-            timeout: 15000,
-            maxRedirects: 5,
-            responseType: "text",
-        });
-
-        const html: string = response.data;
-        const finalUrl: string = (response.request as any)?.res?.responseUrl || productUrl;
-
-        // og:title
-        const titleMatch =
-            html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"'<>]{2,})["']/i) ||
-            html.match(/<meta[^>]+content=["']([^"'<>]{2,})["'][^>]+property=["']og:title["']/i);
-        const rawTitle = titleMatch?.[1] || "";
-        const title = rawTitle
-            .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
-            .replace(/\s*[:\-|]\s*쿠팡.*$/i, "").trim();
-
-        // og:image
-        const imageMatch =
-            html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"'<>]+)["']/i) ||
-            html.match(/<meta[^>]+content=["']([^"'<>]+)["'][^>]+property=["']og:image["']/i);
-        const imageUrl = imageMatch?.[1] || null;
-
-        // 가격: JSON-LD 우선
-        let rawPrice = "";
-        const ldBlocks = html.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi) || [];
-        for (const block of ldBlocks) {
-            const inner = block.replace(/<\/?script[^>]*>/gi, "");
-            try {
-                const json = JSON.parse(inner);
-                const price = json?.offers?.price || json?.offers?.[0]?.price;
-                if (price) { rawPrice = String(price).replace(/,/g, ""); break; }
-            } catch { /* skip */ }
+    for (let hop = 0; hop < 12; hop++) {
+        const extra: Record<string, string> = {};
+        if (cookies.length) extra["Cookie"] = cookies.join("; ");
+        if (url.includes("coupang.com") && !url.includes("link.coupang.com")) {
+            extra["Referer"] = "https://link.coupang.com/";
         }
-        // JSON-LD 없으면 패턴 탐색
-        if (!rawPrice) {
-            const patterns = [
-                /"salePrice"\s*:\s*"?([\d,]+)"?/,
-                /"finalPrice"\s*:\s*"?([\d,]+)"?/,
-                /"price"\s*:\s*"?([\d,]+)"?/,
-            ];
-            for (const pat of patterns) {
-                const m = html.match(pat);
-                if (m) { rawPrice = m[1].replace(/,/g, ""); break; }
+
+        let res: Awaited<ReturnType<typeof rawGet>>;
+        try {
+            res = await rawGet(url, extra);
+        } catch (e: any) {
+            console.error(`[hop ${hop}] rawGet error: ${e.message}`);
+            break;
+        }
+
+        // 쿠키 수집
+        const sc = res.headers["set-cookie"];
+        if (sc) {
+            const list = Array.isArray(sc) ? sc : [sc as string];
+            list.forEach((c: string) => {
+                const kv = c.split(";")[0].trim();
+                if (kv) cookies.push(kv);
+            });
+        }
+
+        console.log(`[hop ${hop}] status=${res.status} url=${url.substring(0, 80)}`);
+
+        if (res.status >= 300 && res.status < 400) {
+            const loc = res.headers["location"] as string | undefined;
+            if (loc) {
+                url = loc.startsWith("http") ? loc : new URL(loc, url).href;
+                continue;
             }
         }
 
-        console.log(`[manual-deal] title="${title}" price="${rawPrice}"`);
-        return { title, imageUrl, rawPrice, finalUrl };
-    } catch (e: any) {
-        console.error("[manual-deal] fetchProductInfo error:", e.message);
-        return { title: "", imageUrl: null, rawPrice: "", finalUrl: productUrl };
+        // 200이거나 더 이상 리다이렉트 없음
+        console.log(`[hop ${hop}] body_len=${res.body.length} snippet="${res.body.substring(0, 120).replace(/\n/g, " ")}"`);
+        return { body: res.body, finalUrl: url };
     }
+
+    return { body: "", finalUrl: url };
 }
 
-// 네이버쇼핑으로 이미지/가격 검색 (폴백)
+// HTML에서 og:title, og:image, 가격 파싱
+function parseProductHtml(html: string): {
+    title: string; imageUrl: string | null; rawPrice: string;
+} {
+    const unescape = (s: string) =>
+        s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+
+    const titleMatch =
+        html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"'<>]{2,})["']/i) ||
+        html.match(/<meta[^>]+content=["']([^"'<>]{2,})["'][^>]+property=["']og:title["']/i);
+    const rawTitle = titleMatch?.[1] ? unescape(titleMatch[1]) : "";
+    const title = rawTitle.replace(/\s*[:\-|]\s*쿠팡.*$/i, "").trim();
+
+    const imageMatch =
+        html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"'<>]+)["']/i) ||
+        html.match(/<meta[^>]+content=["']([^"'<>]+)["'][^>]+property=["']og:image["']/i);
+    const imageUrl = imageMatch?.[1] || null;
+
+    // 가격: JSON-LD 우선
+    let rawPrice = "";
+    for (const block of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+        try {
+            const json = JSON.parse(block[1]);
+            const price = json?.offers?.price ?? json?.offers?.[0]?.price;
+            if (price) { rawPrice = String(price).replace(/,/g, ""); break; }
+        } catch { /* skip */ }
+    }
+    if (!rawPrice) {
+        for (const pat of [/"salePrice":\s*"?([\d]+)"?/, /"finalPrice":\s*"?([\d]+)"?/, /"price":\s*"?([\d]+)"?/]) {
+            const m = html.match(pat);
+            if (m) { rawPrice = m[1]; break; }
+        }
+    }
+
+    return { title, imageUrl, rawPrice };
+}
+
+// 네이버쇼핑으로 이미지/가격 보완
 async function searchNaver(title: string): Promise<{ image: string | null; price: string }> {
-    const clientId = process.env.NAVER_CLIENT_ID;
-    const clientSecret = process.env.NAVER_CLIENT_SECRET;
-    if (!clientId || !clientSecret || !title) return { image: null, price: "" };
+    const id = process.env.NAVER_CLIENT_ID;
+    const secret = process.env.NAVER_CLIENT_SECRET;
+    if (!id || !secret || !title) return { image: null, price: "" };
     try {
         const { data } = await axios.get("https://openapi.naver.com/v1/search/shop.json", {
             params: { query: title, display: 1, sort: "sim" },
-            headers: { "X-Naver-Client-Id": clientId, "X-Naver-Client-Secret": clientSecret },
+            headers: { "X-Naver-Client-Id": id, "X-Naver-Client-Secret": secret },
             timeout: 5000,
         });
         const item = data.items?.[0];
@@ -167,13 +204,16 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: "affiliateLink 필요" }, { status: 400 });
         }
 
-        // 상품 정보 추출
-        const { title: pageTitle, imageUrl: pageImage, rawPrice: pagePrice, finalUrl } = await fetchProductInfo(affiliateLink);
+        // 리다이렉트 체인 추적 후 HTML 수신
+        const { body: html, finalUrl } = await fetchFollowingRedirects(affiliateLink);
+        const { title: pageTitle, imageUrl: pageImage, rawPrice: pagePrice } = parseProductHtml(html);
 
-        // 이미지/가격 없으면 네이버쇼핑 폴백
+        console.log(`[manual-deal] title="${pageTitle}" price="${pagePrice}" image="${pageImage?.substring(0, 60)}"`);
+
+        // 이미지/가격 부족하면 네이버쇼핑 보완
         let imageUrl = pageImage;
         let rawPrice = pagePrice;
-        if ((!imageUrl || !rawPrice) && pageTitle) {
+        if (pageTitle && (!imageUrl || !rawPrice)) {
             const naver = await searchNaver(pageTitle);
             if (!imageUrl) imageUrl = naver.image;
             if (!rawPrice) rawPrice = naver.price;
@@ -187,7 +227,7 @@ export async function POST(request: Request) {
         if (!pageTitle) {
             return NextResponse.json({
                 success: false,
-                error: "상품 정보를 가져오지 못했습니다. 잠시 후 다시 시도하거나 www.coupang.com/vp/... 직접 링크를 사용해보세요.",
+                error: "상품 정보를 가져오지 못했습니다. www.coupang.com/vp/... 직접 링크를 사용해보세요.",
             }, { status: 400 });
         }
 
@@ -214,9 +254,10 @@ export async function POST(request: Request) {
 
         const originalPrice = Number(aiData.originalPrice) || 0;
         const salePrice = Number(aiData.salePrice) || 0;
-        const discountPercent = originalPrice > 0 && salePrice > 0 && originalPrice > salePrice
-            ? Math.round(((originalPrice - salePrice) / originalPrice) * 100)
-            : 0;
+        const discountPercent =
+            originalPrice > 0 && salePrice > 0 && originalPrice > salePrice
+                ? Math.round(((originalPrice - salePrice) / originalPrice) * 100)
+                : 0;
 
         const product = await prisma.product.create({
             data: {
