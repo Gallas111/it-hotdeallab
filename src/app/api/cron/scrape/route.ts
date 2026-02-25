@@ -336,6 +336,7 @@ export async function GET() {
         let gptFilterCount = 0;
         let gptErrorCount = 0;
         let discountFilterCount = 0;
+        let lastError = "";
         const MAX_NEW_PER_RUN = 6; // 타임아웃 방지: 신규 아이템 최대 6개씩 처리
         let newProcessed = 0;
 
@@ -379,7 +380,7 @@ export async function GET() {
                 aiData = JSON.parse(jsonMatch[0]);
             } catch (e: any) {
                 gptErrorCount++;
-                console.error("Claude Error:", e?.message || e);
+                lastError = e?.message || String(e);
                 continue;
             }
 
@@ -474,7 +475,7 @@ export async function GET() {
             sourceStats,
             expired: expired.count,
             totalActive,
-            debug: { dedupCount, gptErrorCount, gptFilterCount, discountFilterCount },
+            debug: { dedupCount, gptErrorCount, gptFilterCount, discountFilterCount, lastError },
         });
     } catch (error: any) {
         console.error("Scrape Error:", error);
