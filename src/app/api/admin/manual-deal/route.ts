@@ -1,18 +1,11 @@
 import { NextResponse } from "next/server";
 import axios from "axios";
-import * as cheerio from "cheerio";
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-
-const HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "ko-KR,ko;q=0.9",
-};
 
 function generateSlug(title: string): string {
     const ascii = title.replace(/\[.*?\]/g, "").trim();
@@ -33,133 +26,140 @@ function toCoupangAffiliateLink(url: string): string {
     }
 }
 
-// 상품 페이지에서 정보 추출 (리다이렉트 추적 포함)
-async function fetchProductInfo(url: string): Promise<{
+// Playwright로 실제 브라우저에서 상품 정보 추출
+async function fetchWithBrowser(url: string): Promise<{
     title: string; imageUrl: string | null; rawPrice: string; finalUrl: string;
 }> {
+    let browser: any = null;
     try {
-        const response = await axios.get(url, {
-            headers: { ...HEADERS, Referer: "https://www.coupang.com/" },
-            timeout: 12000,
-            maxRedirects: 10,
-        });
+        const { chromium } = await import("playwright-core");
 
-        // 리다이렉트 후 최종 URL 추적
-        const finalUrl: string = (response.request as any)?.res?.responseUrl
-            || (response.request as any)?.responseURL
-            || url;
-
-        const html = response.data as string;
-        const $ = cheerio.load(html);
-
-        // 제목 추출 (og:title이 가장 신뢰성 높음)
-        let title = $('meta[property="og:title"]').attr("content")
-            || $('meta[name="og:title"]').attr("content")
-            || $("h1").first().text().trim()
-            || $("title").text().trim()
-            || "";
-        title = title.replace(/ [-|] 쿠팡.*/, "").replace(/쿠팡$/, "").trim();
-
-        // 이미지 추출
-        const imageUrl = $('meta[property="og:image"]').attr("content")
-            || $('meta[name="og:image"]').attr("content")
-            || null;
-
-        // 가격 추출 - JSON-LD 우선
-        let rawPrice = "";
-        $('script[type="application/ld+json"]').each((_, el) => {
-            if (rawPrice) return;
-            try {
-                const data = JSON.parse($(el).html() || "");
-                const price = data?.offers?.price || data?.offers?.[0]?.price;
-                if (price) rawPrice = `${price}원`;
-            } catch { /* ignore */ }
-        });
-
-        // CSS 셀렉터로 가격 추출
-        if (!rawPrice) {
-            rawPrice = $(".total-price strong").text().trim()
-                || $('[class*="total-price"]').text().trim()
-                || $('meta[property="product:price:amount"]').attr("content") || "";
+        // Vercel 프로덕션: sparticuz chromium, 로컬: 시스템 chromium
+        if (process.env.VERCEL) {
+            const chromiumBin = await import("@sparticuz/chromium");
+            chromiumBin.default.setHeadlessMode = true;
+            browser = await chromium.launch({
+                args: chromiumBin.default.args,
+                executablePath: await chromiumBin.default.executablePath(),
+                headless: true,
+            });
+        } else {
+            browser = await chromium.launch({ headless: true });
         }
 
-        return { title, imageUrl, rawPrice, finalUrl };
-    } catch {
+        const page = await browser.newPage();
+        await page.setExtraHTTPHeaders({
+            "Accept-Language": "ko-KR,ko;q=0.9",
+        });
+
+        // 페이지 로드 (리다이렉트 자동 추적)
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+        const finalUrl = page.url();
+
+        // og:title / og:image 추출
+        const title = await page.$eval(
+            'meta[property="og:title"]',
+            (el: any) => el.getAttribute("content") || ""
+        ).catch(() => "");
+
+        const imageUrl = await page.$eval(
+            'meta[property="og:image"]',
+            (el: any) => el.getAttribute("content") || ""
+        ).catch(() => null);
+
+        // 가격 추출 (쿠팡 전용 셀렉터)
+        const rawPrice = await page.$eval(
+            ".total-price strong",
+            (el: any) => el.textContent?.trim() || ""
+        ).catch(async () => {
+            return await page.$eval(
+                '[class*="price"] strong',
+                (el: any) => el.textContent?.trim() || ""
+            ).catch(() => "");
+        });
+
+        return {
+            title: title.replace(/ [-|] 쿠팡.*/, "").trim(),
+            imageUrl: imageUrl || null,
+            rawPrice,
+            finalUrl,
+        };
+    } catch (e) {
+        console.error("Browser fetch error:", e);
         return { title: "", imageUrl: null, rawPrice: "", finalUrl: url };
+    } finally {
+        if (browser) await browser.close();
+    }
+}
+
+// 네이버쇼핑으로 이미지 검색 (폴백)
+async function searchNaverImage(title: string): Promise<string | null> {
+    const clientId = process.env.NAVER_CLIENT_ID;
+    const clientSecret = process.env.NAVER_CLIENT_SECRET;
+    if (!clientId || !clientSecret || !title) return null;
+    try {
+        const { data } = await axios.get("https://openapi.naver.com/v1/search/shop.json", {
+            params: { query: title, display: 1, sort: "sim" },
+            headers: { "X-Naver-Client-Id": clientId, "X-Naver-Client-Secret": clientSecret },
+            timeout: 5000,
+        });
+        const img = data.items?.[0]?.image;
+        return img ? (img.startsWith("//") ? "https:" + img : img) : null;
+    } catch {
+        return null;
     }
 }
 
 export async function POST(request: Request) {
     try {
-        const { affiliateLink, category: forceCategory, title: manualTitle, price: manualPrice } = await request.json();
+        const { affiliateLink, category: forceCategory } = await request.json();
         if (!affiliateLink) {
             return NextResponse.json({ error: "affiliateLink 필요" }, { status: 400 });
         }
 
-        // 상품 정보 추출 (페이지에서)
-        const { title: pageTitle, imageUrl: pageImageUrl, rawPrice, finalUrl } = await fetchProductInfo(affiliateLink);
+        // Playwright로 실제 브라우저에서 정보 추출
+        const { title: pageTitle, imageUrl: pageImage, rawPrice, finalUrl } = await fetchWithBrowser(affiliateLink);
 
-        // 최종 파트너스 링크 결정
+        // 이미지 없으면 네이버쇼핑으로 폴백
+        let imageUrl = pageImage;
+        if (!imageUrl && pageTitle) {
+            imageUrl = await searchNaverImage(pageTitle);
+        }
+
+        // 파트너스 링크 결정
         const finalLink = affiliateLink.includes("link.coupang.com")
             ? affiliateLink
             : toCoupangAffiliateLink(affiliateLink);
 
-        const titleForAI = manualTitle || pageTitle || "쿠팡 상품";
-        const priceForAI = manualPrice || rawPrice;
+        const titleForAI = pageTitle || "쿠팡 상품";
 
-        // 이미지: 페이지 추출 실패 시 네이버쇼핑 API로 검색
-        let imageUrl = pageImageUrl;
-        if (!imageUrl && titleForAI !== "쿠팡 상품") {
-            try {
-                const naverId = process.env.NAVER_CLIENT_ID;
-                const naverSecret = process.env.NAVER_CLIENT_SECRET;
-                if (naverId && naverSecret) {
-                    const { data } = await axios.get("https://openapi.naver.com/v1/search/shop.json", {
-                        params: { query: titleForAI, display: 1, sort: "sim" },
-                        headers: { "X-Naver-Client-Id": naverId, "X-Naver-Client-Secret": naverSecret },
-                        timeout: 5000,
-                    });
-                    const img = data.items?.[0]?.image;
-                    if (img) imageUrl = img.startsWith("//") ? "https:" + img : img;
-                }
-            } catch { /* 이미지 없이 진행 */ }
-        }
-
-        // Claude AI 분석 - 정보가 없어도 URL만으로 최대한 생성
+        // Claude AI 분석
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
         const message = await anthropic.messages.create({
             model: "claude-sonnet-4-6",
             max_tokens: 1200,
             system: `IT·가전·스마트홈 핫딜 전문 큐레이터.
-상품명과 URL 기반으로 핫딜 정보를 생성하라.
-가격 정보가 없어도 상품명만으로 최대한 정보를 생성하라.
+상품명과 가격 기반으로 핫딜 정보를 생성하라.
 반드시 JSON만 반환 (다른 텍스트 절대 금지):
 {"refinedTitle":"제목(50자이내)","category":"골드박스|Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"300자이상 상세설명"}`,
             messages: [{
                 role: "user",
-                content: `상품명: ${titleForAI}\n가격: ${priceForAI || "정보 없음"}\n링크: ${finalUrl}`,
+                content: `상품명: ${titleForAI}\n가격: ${rawPrice || "정보 없음"}\n링크: ${finalUrl}`,
             }],
         });
 
         const block = message.content[0];
         if (block.type !== "text") throw new Error("AI 응답 오류");
-
-        // JSON 파싱 (마크다운 코드블록 포함 대응)
         const raw = block.text.trim();
         const jsonMatch = raw.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-            console.error("Claude raw response:", raw);
-            throw new Error(`AI 응답 파싱 실패: ${raw.substring(0, 100)}`);
-        }
+        if (!jsonMatch) throw new Error(`AI 응답 파싱 실패: ${raw.substring(0, 100)}`);
         const aiData = JSON.parse(jsonMatch[0]);
 
         const originalPrice = Number(aiData.originalPrice) || 0;
-        const salePrice = Number(aiData.salePrice) || Number(manualPrice) || 0;
+        const salePrice = Number(aiData.salePrice) || 0;
         const discountPercent = originalPrice > 0 && salePrice > 0 && originalPrice > salePrice
             ? Math.round(((originalPrice - salePrice) / originalPrice) * 100)
             : 0;
-
-        const mallName = affiliateLink.includes("coupang.com") ? "쿠팡" : "기타";
 
         const product = await prisma.product.create({
             data: {
@@ -170,7 +170,7 @@ export async function POST(request: Request) {
                 salePrice,
                 discountPercent,
                 category: forceCategory || aiData.category || "골드박스",
-                mallName,
+                mallName: "쿠팡",
                 sourceUrl: affiliateLink,
                 aiSummary: aiData.discountInfo
                     ? `[${aiData.discountInfo}] ${aiData.aiSummary || ""}`.trim()
