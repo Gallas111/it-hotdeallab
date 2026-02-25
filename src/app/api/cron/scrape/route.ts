@@ -302,6 +302,9 @@ async function scrapeNaverShopping(): Promise<RawDeal[]> {
 // 메인 핸들러
 // ═══════════════════════════════════════════════════════════
 export async function GET() {
+    if (!process.env.ANTHROPIC_API_KEY) {
+        return NextResponse.json({ error: "ANTHROPIC_API_KEY 환경변수 미설정" }, { status: 500 });
+    }
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
     try {
@@ -346,7 +349,7 @@ export async function GET() {
             let aiData: any = {};
             try {
                 const message = await anthropic.messages.create({
-                    model: "claude-haiku-4-5-20251001",
+                    model: "claude-3-5-haiku-20241022",
                     max_tokens: 1000,
                     system: `IT/가전 핫딜 전문 큐레이터. 아래 두 조건을 모두 충족해야만 등록.
 
