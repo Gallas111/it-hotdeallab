@@ -6,7 +6,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// ScraperAPI로 쿠팡 페이지 직접 가져와서 정가/할인가 추출
+// ScraperAPI premium으로 쿠팡 페이지 직접 스크래핑
+// JSON-LD의 StrikethroughPrice = 정가, offers.price = 할인가
 async function getCoupangPricesDirect(affiliateLink: string): Promise<{
     salePrice: number;
     originalPrice: number;
@@ -16,66 +17,42 @@ async function getCoupangPricesDirect(affiliateLink: string): Promise<{
     if (!apiKey || !affiliateLink) return null;
 
     try {
-        const scraperUrl = `https://api.scraperapi.com/?api_key=${apiKey}&url=${encodeURIComponent(affiliateLink)}&country_code=kr&device_type=desktop`;
-        const { data: html } = await axios.get(scraperUrl, { timeout: 30000 });
+        const scraperUrl = `https://api.scraperapi.com/?api_key=${apiKey}&url=${encodeURIComponent(affiliateLink)}&premium=true&country_code=kr`;
+        const { data: html } = await axios.get(scraperUrl, { timeout: 55000 });
 
-        if (typeof html !== "string" || html.length < 500) return null;
+        if (typeof html !== "string" || html.length < 10000) return null;
 
         let salePrice = 0;
         let originalPrice = 0;
         let image: string | null = null;
 
-        // 1. 쿠팡 JS 내장 데이터에서 가격 추출
-        const salePriceMatch = html.match(/"salePrice"\s*:\s*(\d+)/)
-            || html.match(/"finalPrice"\s*:\s*(\d+)/)
-            || html.match(/"currentPrice"\s*:\s*(\d+)/);
-        if (salePriceMatch) salePrice = parseInt(salePriceMatch[1]);
+        // JSON-LD에서 가격 추출 (가장 신뢰할 수 있는 소스)
+        const ldBlocks = html.match(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g) || [];
+        for (const block of ldBlocks) {
+            try {
+                const ld = JSON.parse(block.replace(/<script[^>]*>/, "").replace(/<\/script>/, ""));
+                const offers = ld?.offers;
+                if (!offers) continue;
 
-        const origPriceMatch = html.match(/"originalPrice"\s*:\s*(\d+)/)
-            || html.match(/"basePrice"\s*:\s*(\d+)/)
-            || html.match(/"listPrice"\s*:\s*(\d+)/)
-            || html.match(/"regularPrice"\s*:\s*(\d+)/);
-        if (origPriceMatch) originalPrice = parseInt(origPriceMatch[1]);
+                // 할인가 (현재가)
+                const price = Number(offers.price || 0);
+                if (price > 0) salePrice = price;
 
-        // 2. 할인율로 정가 역산 (정가 못 찾았을 때)
-        if (originalPrice === 0 && salePrice > 0) {
-            const discMatch = html.match(/"discountRate"\s*:\s*(\d+)/)
-                || html.match(/(\d+)%\s*할인/);
-            if (discMatch) {
-                const disc = parseInt(discMatch[1]);
-                if (disc >= 5 && disc <= 90) {
-                    originalPrice = Math.round(salePrice / (1 - disc / 100) / 100) * 100;
+                // 정가: StrikethroughPrice = 쿠팡 취소선 가격 = 원래 정가
+                const priceSpec = offers.priceSpecification;
+                if (priceSpec && (priceSpec.priceType || "").includes("StrikethroughPrice")) {
+                    const orig = Number(priceSpec.price || 0);
+                    if (orig > price) originalPrice = orig;
                 }
-            }
-        }
 
-        // 3. JSON-LD structured data
-        if (salePrice === 0) {
-            const ldBlocks = html.match(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g) || [];
-            for (const block of ldBlocks) {
-                try {
-                    const ld = JSON.parse(block.replace(/<script[^>]*>/, "").replace(/<\/script>/, ""));
-                    const price = Number(ld?.offers?.price || 0);
-                    if (price > 0) { salePrice = price; break; }
-                } catch {}
-            }
-        }
+                // 이미지
+                const imgs = ld?.image;
+                if (Array.isArray(imgs) && imgs.length > 0) image = imgs[0];
+                else if (typeof imgs === "string") image = imgs;
 
-        // 4. HTML 패턴 fallback
-        if (salePrice === 0) {
-            const m = html.match(/<strong[^>]*class="[^"]*total-price[^"]*"[^>]*>([\d,]+)/)
-                || html.match(/id="productPrice"[^>]*>\s*([\d,]+)/);
-            if (m) salePrice = parseInt(m[1].replace(/,/g, ""));
+                if (salePrice > 0) break;
+            } catch {}
         }
-        if (originalPrice === 0) {
-            const m = html.match(/<del[^>]*>([\d,]+)원?<\/del>/)
-                || html.match(/class="[^"]*origin-price[^"]*"[^>]*>([\d,]+)/);
-            if (m) originalPrice = parseInt(m[1].replace(/,/g, ""));
-        }
-
-        // 5. OG 이미지
-        const imgMatch = html.match(/<meta[^>]*property="og:image"[^>]*content="([^"]+)"/);
-        if (imgMatch) image = imgMatch[1];
 
         console.log(`[scraperapi] sale=${salePrice} orig=${originalPrice} img=${!!image}`);
         if (salePrice === 0) return null;
@@ -120,7 +97,6 @@ async function getCoupangPriceFromNaver(title: string): Promise<{
         const img = coupangItem.image;
         const image = img ? (img.startsWith("//") ? "https:" + img : img) : null;
 
-        // 정가 추정 순서
         let originalPrice = Number(coupangItem.hprice) > salePrice ? Number(coupangItem.hprice) : 0;
 
         if (originalPrice === 0 && nonCoupangItems.length > 0) {
@@ -155,28 +131,45 @@ export async function POST() {
             },
         });
 
+        // 1단계: 전체 네이버 조회 (빠름)
+        const naverResults = await Promise.all(
+            products.map(p => getCoupangPriceFromNaver(p.title))
+        );
+
+        // 2단계: 정가 없는 상품만 ScraperAPI 병렬 조회
+        const needsDirect = products
+            .map((p, i) => ({ p, naver: naverResults[i] }))
+            .filter(({ naver }) => !naver || naver.originalPrice === 0);
+
+        const directResults = await Promise.allSettled(
+            needsDirect.map(({ p }) => getCoupangPricesDirect(p.affiliateLink))
+        );
+
+        const directMap = new Map<string, { salePrice: number; originalPrice: number; image: string | null } | null>();
+        needsDirect.forEach(({ p }, i) => {
+            const r = directResults[i];
+            directMap.set(p.id, r.status === "fulfilled" ? r.value : null);
+        });
+
+        // 3단계: 결과 합산 후 DB 업데이트
         let updated = 0;
         const changes: string[] = [];
 
-        for (const p of products) {
-            // 1단계: Naver Shopping으로 가격 조회 (빠름, 크레딧 소모 없음)
-            const naverData = await getCoupangPriceFromNaver(p.title);
-            let salePrice = naverData?.salePrice || 0;
-            let originalPrice = naverData?.originalPrice || 0;
-            let image = naverData?.image || null;
+        for (let i = 0; i < products.length; i++) {
+            const p = products[i];
+            const naver = naverResults[i];
+            const direct = directMap.get(p.id);
 
+            // 가격 결정: Naver 우선, 없으면 ScraperAPI
+            const salePrice = naver?.salePrice || direct?.salePrice || 0;
             if (salePrice === 0) continue;
 
-            // 2단계: 정가가 없으면 ScraperAPI로 쿠팡 페이지 직접 스크래핑
-            if (originalPrice === 0 && p.affiliateLink) {
-                console.log(`[sync] ScraperAPI fallback for "${p.title.substring(0, 25)}"`);
-                const direct = await getCoupangPricesDirect(p.affiliateLink);
-                if (direct) {
-                    if (direct.originalPrice > 0) originalPrice = direct.originalPrice;
-                    if (direct.salePrice > 0 && !naverData) salePrice = direct.salePrice;
-                    if (!image && direct.image) image = direct.image;
-                }
-            }
+            // 정가: Naver 우선, 없으면 ScraperAPI
+            const originalPrice = (naver?.originalPrice || 0) > 0
+                ? naver!.originalPrice
+                : (direct?.originalPrice || 0);
+
+            const image = naver?.image || direct?.image || null;
 
             const discountPercent = originalPrice > 0 && originalPrice > salePrice
                 ? Math.round(((originalPrice - salePrice) / originalPrice) * 100)
@@ -200,8 +193,6 @@ export async function POST() {
             } else {
                 changes.push(`"${p.title.substring(0, 25)}": 정가 ${originalPrice.toLocaleString()}원${discStr}`);
             }
-
-            await new Promise(r => setTimeout(r, 300));
         }
 
         return NextResponse.json({ success: true, total: products.length, updated, changes });
