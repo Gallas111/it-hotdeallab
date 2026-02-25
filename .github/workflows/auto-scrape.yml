@@ -15,6 +15,7 @@ jobs:
           echo "🔄 수집 시작: $(date -u '+%Y-%m-%d %H:%M UTC')"
           response=$(curl -s -o /tmp/scrape_result.json -w "%{http_code}" \
             --max-time 120 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             "https://ithotdealab.com/api/cron/scrape")
           echo "HTTP Status: $response"
           cat /tmp/scrape_result.json

@@ -406,7 +406,16 @@ function interleaveDeals(...sources: RawDeal[][]): RawDeal[] {
 // ═══════════════════════════════════════════════════════════
 // 메인 핸들러
 // ═══════════════════════════════════════════════════════════
-export async function GET() {
+export async function GET(request: Request) {
+    // CRON_SECRET 인증 (설정된 경우에만 검증)
+    const cronSecret = process.env.CRON_SECRET;
+    if (cronSecret) {
+        const auth = request.headers.get("authorization");
+        if (auth !== `Bearer ${cronSecret}`) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+    }
+
     if (!process.env.ANTHROPIC_API_KEY) {
         return NextResponse.json({ error: "ANTHROPIC_API_KEY 환경변수 미설정" }, { status: 500 });
     }
