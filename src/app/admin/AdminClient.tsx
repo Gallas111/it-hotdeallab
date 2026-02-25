@@ -23,6 +23,11 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
     const [products, setProducts] = useState(initialProducts);
     const [scrapeStatus, setScrapeStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
     const [scrapeResult, setScrapeResult] = useState<string>("");
+
+    // 수동 등록
+    const [manualLink, setManualLink] = useState("");
+    const [manualStatus, setManualStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+    const [manualResult, setManualResult] = useState("");
     const [linkUpdateStatus, setLinkUpdateStatus] = useState<"idle" | "loading" | "done">("idle");
     const [imageUpdateStatus, setImageUpdateStatus] = useState<"idle" | "loading" | "done">("idle");
     const [imageUpdateResult, setImageUpdateResult] = useState<string>("");
@@ -108,6 +113,34 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
         } catch (e: any) {
             setImageUpdateResult(`❌ 요청 실패: ${e.message}`);
             setImageUpdateStatus("idle");
+        }
+    };
+
+    const handleManualRegister = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!manualLink.trim()) return;
+        setManualStatus("loading");
+        setManualResult("");
+        try {
+            const res = await fetch("/api/admin/manual-deal", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ affiliateLink: manualLink.trim() }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                setManualResult(`✅ ${data.message}`);
+                setManualStatus("done");
+                setManualLink("");
+                const r = await fetch("/api/admin/products");
+                setProducts(await r.json());
+            } else {
+                setManualResult(`❌ 오류: ${data.error}`);
+                setManualStatus("error");
+            }
+        } catch (e: any) {
+            setManualResult(`❌ 요청 실패: ${e.message}`);
+            setManualStatus("error");
         }
     };
 
@@ -239,6 +272,44 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
                     <p className="text-[12px] font-bold text-gray-400 mt-1">이미지 없음</p>
                 </div>
             </div>
+
+            {/* 수동 딜 등록 */}
+            <section className="card-section space-y-4">
+                <div className="flex items-center gap-3 border-b border-gray-50 pb-4 dark:border-white/5">
+                    <span className="h-5 w-1 rounded-full bg-yellow-500"></span>
+                    <h3 className="text-[17px] font-extrabold text-[var(--foreground)]">쿠팡 딜 수동 등록</h3>
+                </div>
+                <p className="text-[13px] text-gray-400">쿠팡 파트너스에서 생성한 상품 링크를 붙여넣으면 AI가 자동으로 정보를 추출해 등록합니다.</p>
+                <div className="rounded-xl bg-yellow-50 border border-yellow-200 p-3">
+                    <p className="text-[12px] font-bold text-yellow-700">
+                        📢 이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.
+                    </p>
+                </div>
+                <form onSubmit={handleManualRegister} className="flex gap-3 flex-wrap">
+                    <input
+                        type="url"
+                        value={manualLink}
+                        onChange={e => { setManualLink(e.target.value); setManualStatus("idle"); setManualResult(""); }}
+                        placeholder="https://www.coupang.com/vp/products/... 또는 https://link.coupang.com/..."
+                        className="flex-1 min-w-0 rounded-xl border border-gray-200 px-4 py-3 text-[13px] font-medium text-[var(--foreground)] bg-[var(--surface2)] outline-none focus:border-yellow-400 dark:border-white/10"
+                    />
+                    <button
+                        type="submit"
+                        disabled={manualStatus === "loading" || !manualLink.trim()}
+                        className="rounded-xl bg-yellow-500 px-6 py-3 text-[14px] font-black text-white transition-all hover:opacity-80 disabled:opacity-50 shrink-0"
+                    >
+                        {manualStatus === "loading" ? "⏳ 등록 중..." : "➕ 등록"}
+                    </button>
+                </form>
+                {manualResult && (
+                    <div className={`rounded-xl p-4 text-[13px] font-bold ${manualStatus === "error" ? "bg-red-50 text-red-600" : "bg-green-50 text-green-700"}`}>
+                        {manualResult}
+                        {manualStatus === "done" && (
+                            <a href={`/deal/${products[0]?.id}`} target="_blank" className="ml-3 underline text-green-800">페이지 확인 →</a>
+                        )}
+                    </div>
+                )}
+            </section>
 
             {/* 크롤링 실행 */}
             <section className="card-section space-y-4">
