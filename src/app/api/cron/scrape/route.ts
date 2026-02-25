@@ -73,7 +73,22 @@ async function fetchShopLink(postUrl: string, referer: string): Promise<string |
             if (href.startsWith("http") && isShopLink(href)) found = href;
         });
 
-        // 2. 리다이렉트 패턴
+        // 2. 뽐뿌 s.ppomppu.co.kr base64 인코딩 링크 해독
+        if (!found) {
+            $("a[href*='s.ppomppu.co.kr']").each((_, el) => {
+                if (found) return;
+                const href = $(el).attr("href") || "";
+                const m = href.match(/[?&]target=([^&]+)/);
+                if (m) {
+                    try {
+                        const decoded = Buffer.from(m[1], "base64").toString("utf-8");
+                        if (decoded.startsWith("http") && isShopLink(decoded)) found = decoded;
+                    } catch { /* skip */ }
+                }
+            });
+        }
+
+        // 3. 리다이렉트 패턴 (url= 파라미터)
         if (!found) {
             $("a[href*='redirect'], a[href*='go.php'], a[href*='link?']").each((_, el) => {
                 if (found) return;
@@ -88,13 +103,24 @@ async function fetchShopLink(postUrl: string, referer: string): Promise<string |
             });
         }
 
-        // 3. 전체 페이지
+        // 4. 전체 페이지 href
         if (!found) {
             $("a[href]").each((_, el) => {
                 if (found) return;
                 const href = $(el).attr("href") || "";
                 if (href.startsWith("http") && isShopLink(href)) found = href;
             });
+        }
+
+        // 5. 페이지 텍스트에서 쇼핑몰 URL 직접 추출 (뽐뿌 등 텍스트로 URL 노출하는 경우)
+        if (!found) {
+            const bodyText = $.root().text();
+            const urlMatch = bodyText.match(/https?:\/\/[^\s"'<>]+/g);
+            if (urlMatch) {
+                for (const url of urlMatch) {
+                    if (isShopLink(url)) { found = url; break; }
+                }
+            }
         }
 
         return found;
