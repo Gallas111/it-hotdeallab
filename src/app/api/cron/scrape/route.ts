@@ -172,35 +172,21 @@ async function scrapeClien(): Promise<RawDeal[]> {
         );
         const $ = cheerio.load(html);
         const deals: RawDeal[] = [];
+        const seen = new Set<string>();
 
-        $(".list_item").each((i, el) => {
-            if (i >= 15) return;
-            const title = $(el).find(".list_subject .subject_fixed, .list_subject a").first().text().trim();
-            if (!title || title.length < 5) return;
-            const href = $(el).find(".list_subject a").attr("href");
-            if (!href) return;
-            const link = href.startsWith("http") ? href : "https://www.clien.net" + href;
-            const mallMatch = title.match(/\[(.*?)\]/);
-            deals.push({ title, link, mallName: mallMatch?.[1] || "기타", source: "클리앙" });
+        // 클리앙은 게시글 링크가 /service/board/jirum/[ID] 패턴으로 직접 렌더링됨
+        $('a[href*="/service/board/jirum/"]').each((_, el) => {
+            if (deals.length >= 15) return;
+            const href = $(el).attr("href") || "";
+            const text = $(el).text().replace(/\s+/g, " ").trim();
+            if (text.length < 8) return;
+            if (/알뜰구매|이용규칙|목록|더보기|카테고리/.test(text)) return;
+            const link = "https://www.clien.net" + href.split("?")[0];
+            if (seen.has(link)) return;
+            seen.add(link);
+            const mallMatch = text.match(/\[(.*?)\]/);
+            deals.push({ title: text, link, mallName: mallMatch?.[1] || "기타", source: "클리앙" });
         });
-
-        // 폴백
-        if (deals.length === 0) {
-            const seen = new Set<string>();
-            $("a[href]").each((_, el) => {
-                const href = $(el).attr("href") || "";
-                const text = $(el).text().trim();
-                if (!href.includes("/service/board/jirum/")) return;
-                if (text.length < 5 || /알뜰구매|이용규칙/.test(text)) return;
-                const link = href.startsWith("http") ? href : "https://www.clien.net" + href;
-                const clean = link.split("?")[0];
-                if (seen.has(clean)) return;
-                seen.add(clean);
-                const mallMatch = text.match(/\[(.*?)\]/);
-                deals.push({ title: text, link, mallName: mallMatch?.[1] || "기타", source: "클리앙" });
-            });
-            deals.splice(15);
-        }
 
         return deals;
     } catch {
@@ -209,27 +195,26 @@ async function scrapeClien(): Promise<RawDeal[]> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 소스 2: 뽐뿌 IT/컴퓨터 게시판
+// 소스 2: 루리웹 핫딜 게시판 (뽐뿌 403 차단으로 대체)
 // ═══════════════════════════════════════════════════════════
-async function scrapePpomppu(): Promise<RawDeal[]> {
+async function scrapeRuliweb(): Promise<RawDeal[]> {
     try {
         const { data: html } = await axios.get(
-            "https://www.ppomppu.co.kr/zboard/zboard.php?id=computer",
-            { headers: { ...HEADERS, Referer: "https://www.ppomppu.co.kr/" }, timeout: 10000 }
+            "https://bbs.ruliweb.com/market/board/1020",
+            { headers: { ...HEADERS, Referer: "https://bbs.ruliweb.com/" }, timeout: 10000 }
         );
         const $ = cheerio.load(html);
         const deals: RawDeal[] = [];
 
-        $("tr.list0, tr.list1").each((i, el) => {
+        $("td.subject a.subject_link").each((i, el) => {
             if (i >= 15) return;
-            const titleEl = $(el).find("a.title, .title a, td.title a").first();
-            const title = titleEl.text().trim();
+            const title = $(el).text().trim();
             if (!title || title.length < 5) return;
-            const href = titleEl.attr("href") || $(el).find("a[href*='view.php']").attr("href") || "";
+            const href = $(el).attr("href") || "";
             if (!href) return;
-            const link = href.startsWith("http") ? href : "https://www.ppomppu.co.kr" + href;
+            const link = href.startsWith("http") ? href : "https://bbs.ruliweb.com" + href;
             const mallMatch = title.match(/\[([^\]]+)\]/);
-            deals.push({ title, link, mallName: mallMatch?.[1] || "뽐뿌", source: "뽐뿌" });
+            deals.push({ title, link, mallName: mallMatch?.[1] || "루리웹", source: "루리웹" });
         });
 
         return deals;
@@ -238,52 +223,6 @@ async function scrapePpomppu(): Promise<RawDeal[]> {
     }
 }
 
-// ═══════════════════════════════════════════════════════════
-// 소스 3: 퀘이사존 세일정보
-// ═══════════════════════════════════════════════════════════
-async function scrapeQuasarzone(): Promise<RawDeal[]> {
-    try {
-        const { data: html } = await axios.get(
-            "https://quasarzone.com/bbs/qb_saleinfo",
-            { headers: { ...HEADERS, Referer: "https://quasarzone.com/" }, timeout: 10000 }
-        );
-        const $ = cheerio.load(html);
-        const deals: RawDeal[] = [];
-
-        $(".market-info-list li, .list-box .item").each((i, el) => {
-            if (i >= 15) return;
-            const titleEl = $(el).find(".tit, .title, a.subject").first();
-            const title = titleEl.text().trim();
-            if (!title || title.length < 5) return;
-            const href = titleEl.closest("a").attr("href") || titleEl.attr("href") || $(el).find("a").first().attr("href") || "";
-            if (!href) return;
-            const link = href.startsWith("http") ? href : "https://quasarzone.com" + href;
-            const priceEl = $(el).find(".sale-price, .price").first().text().trim();
-            const mallMatch = title.match(/\[([^\]]+)\]/);
-            deals.push({ title: title + (priceEl ? ` ${priceEl}` : ""), link, mallName: mallMatch?.[1] || "퀘이사존", source: "퀘이사존" });
-        });
-
-        // 폴백
-        if (deals.length === 0) {
-            const seen = new Set<string>();
-            $("a[href*='/bbs/qb_saleinfo/views/']").each((_, el) => {
-                const href = $(el).attr("href") || "";
-                const text = $(el).text().trim();
-                if (text.length < 5) return;
-                const link = href.startsWith("http") ? href : "https://quasarzone.com" + href;
-                if (seen.has(link)) return;
-                seen.add(link);
-                const mallMatch = text.match(/\[([^\]]+)\]/);
-                deals.push({ title: text, link, mallName: mallMatch?.[1] || "퀘이사존", source: "퀘이사존" });
-            });
-            deals.splice(15);
-        }
-
-        return deals;
-    } catch {
-        return [];
-    }
-}
 
 // ═══════════════════════════════════════════════════════════
 // 소스 4: 네이버 쇼핑 API
@@ -342,18 +281,16 @@ export async function GET() {
             where: { createdAt: { lt: threeDaysAgo } },
         });
 
-        const [clienDeals, ppomppuDeals, quasarDeals, naverDeals] = await Promise.all([
+        const [clienDeals, ruliwebDeals, naverDeals] = await Promise.all([
             scrapeClien(),
-            scrapePpomppu(),
-            scrapeQuasarzone(),
+            scrapeRuliweb(),
             scrapeNaverShopping(),
         ]);
 
-        const allDeals = [...clienDeals, ...ppomppuDeals, ...quasarDeals, ...naverDeals];
+        const allDeals = [...clienDeals, ...ruliwebDeals, ...naverDeals];
         const sourceStats = {
             클리앙: clienDeals.length,
-            뽐뿌: ppomppuDeals.length,
-            퀘이사존: quasarDeals.length,
+            루리웹: ruliwebDeals.length,
             네이버쇼핑: naverDeals.length,
         };
 
