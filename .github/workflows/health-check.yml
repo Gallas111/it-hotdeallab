@@ -1,0 +1,28 @@
+name: 사이트 헬스체크
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # 6시간마다 자동 점검 (00:00, 06:00, 12:00, 18:00 UTC)
+  workflow_dispatch:         # 수동 실행 버튼
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: 헬스체크 실행
+        run: |
+          echo "🔍 헬스체크 시작: $(date -u '+%Y-%m-%d %H:%M UTC')"
+          response=$(curl -s -o /tmp/health.json -w "%{http_code}" \
+            --max-time 30 \
+            "https://ithotdealab.com/api/monitor/health")
+          echo "HTTP Status: $response"
+          cat /tmp/health.json
+          if [ "$response" != "200" ]; then
+            echo ""
+            echo "❌ 사이트 이상 감지! (HTTP $response)"
+            echo "활성 딜 부족 또는 최근 딜 수집 없음 — 크롤러 확인 필요"
+            exit 1
+          fi
+          echo ""
+          echo "✅ 정상"

@@ -148,6 +148,34 @@ async function sendTelegramAlert(newDeals: string[]) {
     } catch { /* 알림 실패는 무시 */ }
 }
 
+// ─── 텔레그램 모니터링 경고 ──────────────────────────────────
+async function sendTelegramMonitorAlert(sourceStats: Record<string, number>, totalDeals: number) {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
+    if (!token || !chatId) return;
+
+    const sourceLines = Object.entries(sourceStats)
+        .map(([src, cnt]) => `${cnt === 0 ? "🔴" : "✅"} ${src}: ${cnt}개 수집`)
+        .join("\n");
+
+    const text = [
+        `⚠️ IT핫딜랩 크롤러 이상 감지!`,
+        ``,
+        sourceLines,
+        ``,
+        `📊 현재 활성 딜: ${totalDeals}개`,
+        `🔗 https://ithotdealab.com/admin`,
+    ].join("\n");
+
+    try {
+        await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+            chat_id: chatId,
+            text,
+            parse_mode: "HTML",
+        });
+    } catch { /* 무시 */ }
+}
+
 // ─── URL-safe slug 생성 ──────────────────────────────────────
 function generateSlug(title: string): string {
     const ascii = title
@@ -415,11 +443,20 @@ export async function GET() {
         // 새 딜이 있으면 텔레그램 알림 전송
         await sendTelegramAlert(results);
 
+        // ── 모니터링: 커뮤니티 소스 0개 또는 활성 딜 부족 감지 ──
+        const communitySources = ["클리앙", "루리웹"];
+        const hasBrokenSource = communitySources.some(src => (sourceStats as any)[src] === 0);
+        const totalActive = await prisma.product.count({ where: { isActive: true } });
+        if (hasBrokenSource || totalActive < 5) {
+            await sendTelegramMonitorAlert(sourceStats, totalActive);
+        }
+
         return NextResponse.json({
             success: true,
             added: results,
             sourceStats,
             expired: expired.count,
+            totalActive,
         });
     } catch (error: any) {
         console.error("Scrape Error:", error);
