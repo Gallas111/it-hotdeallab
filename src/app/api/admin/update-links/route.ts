@@ -43,10 +43,10 @@ async function extractShopLink(postUrl: string): Promise<string | null> {
             if (href.startsWith("http") && isShopLink(href)) found = href;
         });
 
-        // 2. 뽐뿌 s.ppomppu.co.kr base64 링크 해독 (unquoted href 대비 raw HTML 파싱)
-        if (!found) {
-            const rawMatches = html.match(/s\.ppomppu\.co\.kr[^"'\s>]*target=([A-Za-z0-9+/=]+)/g) || [];
-            for (const raw of rawMatches) {
+        // 2. 뽐뿌 base64 인코딩 링크 해독 (raw HTML에서 target= 파라미터 직접 추출)
+        if (!found && postUrl.includes("ppomppu")) {
+            const b64Matches = html.match(/[?&]target=([A-Za-z0-9+/=]{20,})/g) || [];
+            for (const raw of b64Matches) {
                 const m = raw.match(/target=([A-Za-z0-9+/=]+)/);
                 if (m) {
                     try {
