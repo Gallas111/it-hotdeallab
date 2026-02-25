@@ -333,10 +333,14 @@ export async function GET() {
         let gptFilterCount = 0;
         let gptErrorCount = 0;
         let discountFilterCount = 0;
+        const MAX_NEW_PER_RUN = 6; // 타임아웃 방지: 신규 아이템 최대 6개씩 처리
+        let newProcessed = 0;
 
         for (const deal of allDeals) {
+            if (newProcessed >= MAX_NEW_PER_RUN) break;
             const exists = await prisma.product.findFirst({ where: { sourceUrl: deal.link } });
             if (exists) { dedupCount++; continue; }
+            newProcessed++;
 
             // Claude: IT 핫딜 여부 판별
             let aiData: any = {};
