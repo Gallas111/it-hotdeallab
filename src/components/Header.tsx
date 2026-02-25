@@ -42,20 +42,6 @@ export default function Header() {
                     </svg>
                 </div>
 
-                {/* 우측 메뉴 */}
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                    <Link href="/admin" style={{
-                        fontSize: 12, fontWeight: 700,
-                        color: "var(--muted)",
-                        textDecoration: "none",
-                        padding: "5px 10px",
-                        borderRadius: 6,
-                        border: "1px solid var(--border)",
-                        transition: "all 0.15s",
-                    }}>
-                        관리
-                    </Link>
-                </div>
             </div>
         </header>
     );
