@@ -6,7 +6,75 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// Naver Shopping: 쿠팡 할인가 + 정가 추정 (비쿠팡 판매자 가격 활용)
+const NAV_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
+
+// 네이버 쇼핑 카탈로그 페이지에서 정가 추출 (쿠팡 전용 상품용 fallback)
+async function getOriginalPriceFromNaverCatalog(naverProductId: string, salePrice: number): Promise<number> {
+    if (!naverProductId || salePrice <= 0) return 0;
+    try {
+        const { data: html } = await axios.get(
+            `https://search.shopping.naver.com/catalog/${naverProductId}`,
+            {
+                headers: {
+                    "User-Agent": NAV_UA,
+                    "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+                    "Accept-Language": "ko-KR,ko;q=0.9",
+                    "Referer": "https://search.shopping.naver.com/",
+                },
+                timeout: 8000,
+            }
+        );
+
+        // __NEXT_DATA__ JSON에서 highestPrice / normalPrice / originalPrice 탐색
+        const nextMatch = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+        if (nextMatch) {
+            try {
+                const nd = JSON.parse(nextMatch[1]);
+                const str = JSON.stringify(nd);
+                for (const key of ["highestPrice", "normalPrice", "originalPrice", "regularPrice", "highPrice"]) {
+                    const m = str.match(new RegExp(`"${key}"\\s*:\\s*(\\d+)`));
+                    if (m) {
+                        const p = parseInt(m[1]);
+                        if (p > salePrice * 1.05 && p < salePrice * 5) {
+                            console.log(`[catalog] ${key}=${p} for productId=${naverProductId}`);
+                            return p;
+                        }
+                    }
+                }
+            } catch {}
+        }
+
+        // JSON-LD 탐색 (highPrice)
+        const ldMatches = html.match(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g) || [];
+        for (const block of ldMatches) {
+            try {
+                const ld = JSON.parse(block.replace(/<script[^>]*>/, "").replace(/<\/script>/, ""));
+                const highPrice = Number(ld?.offers?.highPrice || ld?.offers?.price || 0);
+                if (highPrice > salePrice * 1.05 && highPrice < salePrice * 5) {
+                    console.log(`[catalog] ld+json highPrice=${highPrice}`);
+                    return highPrice;
+                }
+            } catch {}
+        }
+
+        // 정규식 fallback: HTML 전체에서 패턴 탐색
+        for (const key of ["highestPrice", "normalPrice", "originalPrice", "regularPrice"]) {
+            const m = html.match(new RegExp(`"${key}"[:\\s]*"?(\\d{4,8})"?`));
+            if (m) {
+                const p = parseInt(m[1]);
+                if (p > salePrice * 1.05 && p < salePrice * 5) {
+                    console.log(`[catalog] regex ${key}=${p}`);
+                    return p;
+                }
+            }
+        }
+    } catch (e: any) {
+        console.error(`[catalog] error for ${naverProductId}:`, e.message);
+    }
+    return 0;
+}
+
+// Naver Shopping: 쿠팡 할인가 + 정가 추정
 async function getCoupangPriceFromNaver(title: string): Promise<{
     salePrice: number;
     originalPrice: number;
@@ -27,7 +95,6 @@ async function getCoupangPriceFromNaver(title: string): Promise<{
         const items: any[] = data.items || [];
         if (items.length === 0) return null;
 
-        // 쿠팡 vs 비쿠팡 분리
         const coupangItems = items.filter(i =>
             i.mallName?.includes("쿠팡") || (i.link || "").includes("coupang.com")
         );
@@ -43,28 +110,31 @@ async function getCoupangPriceFromNaver(title: string): Promise<{
         const image = img ? (img.startsWith("//") ? "https:" + img : img) : null;
 
         // 정가 추정 순서:
-        // 1) 쿠팡 hprice (가격비교 상품인 경우)
+        // 1) 쿠팡 hprice (가격비교 상품)
         let originalPrice = Number(coupangItem.hprice) > salePrice ? Number(coupangItem.hprice) : 0;
 
-        // 2) 비쿠팡 판매자들 중 쿠팡보다 10% 이상 비싸고 3배 이하인 최솟값
+        // 2) 비쿠팡 판매자 중 10%~3배 범위 최솟값
         if (originalPrice === 0 && nonCoupangItems.length > 0) {
             const otherPrices = nonCoupangItems
                 .map(i => Number(i.lprice))
                 .filter(p => p > salePrice * 1.1 && p < salePrice * 3);
             if (otherPrices.length > 0) {
                 originalPrice = Math.min(...otherPrices);
-                console.log(`[sync] "${title.substring(0, 25)}" 비쿠팡 정가 추정: ${originalPrice}원`);
+                console.log(`[sync] "${title.substring(0, 25)}" 비쿠팡 정가=${originalPrice}`);
             }
         }
 
-        // 3) 전체 hprice 중 합리적인 값
+        // 3) 전체 hprice fallback
         if (originalPrice === 0) {
             const allHprices = items
                 .map(i => Number(i.hprice))
                 .filter(p => p > salePrice * 1.05 && p < salePrice * 3);
-            if (allHprices.length > 0) {
-                originalPrice = Math.min(...allHprices);
-            }
+            if (allHprices.length > 0) originalPrice = Math.min(...allHprices);
+        }
+
+        // 4) 네이버 카탈로그 페이지 직접 파싱 (쿠팡 전용 상품 최종 fallback)
+        if (originalPrice === 0 && coupangItem.productId) {
+            originalPrice = await getOriginalPriceFromNaverCatalog(coupangItem.productId, salePrice);
         }
 
         const discountPercent = originalPrice > 0
@@ -94,7 +164,6 @@ export async function POST() {
             if (!priceData || priceData.salePrice === 0) continue;
 
             const priceChanged = priceData.salePrice !== p.salePrice;
-            // discountPercent 또는 originalPrice 중 하나라도 달라지면 업데이트
             const discountChanged = priceData.discountPercent !== p.discountPercent
                 || priceData.originalPrice !== p.originalPrice;
             const imgChanged = !p.imageUrl && !!priceData.image;
@@ -118,7 +187,7 @@ export async function POST() {
                 changes.push(`"${p.title.substring(0, 25)}": 정가 ${priceData.originalPrice.toLocaleString()}원${discStr}`);
             }
 
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise(r => setTimeout(r, 300));
         }
 
         return NextResponse.json({
