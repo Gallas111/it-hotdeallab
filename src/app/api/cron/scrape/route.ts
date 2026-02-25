@@ -223,24 +223,26 @@ async function scrapeClien(): Promise<RawDeal[]> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 소스 2: 루리웹 핫딜 게시판 (뽐뿌 403 차단으로 대체)
+// 소스 2: 루리웹 핫딜 (RSS 피드 사용 - 봇 차단 우회)
 // ═══════════════════════════════════════════════════════════
 async function scrapeRuliweb(): Promise<RawDeal[]> {
     try {
-        const { data: html } = await axios.get(
-            "https://bbs.ruliweb.com/market/board/1020",
+        const { data: xml } = await axios.get(
+            "https://bbs.ruliweb.com/market/board/1020.rss",
             { headers: { ...HEADERS, Referer: "https://bbs.ruliweb.com/" }, timeout: 10000 }
         );
-        const $ = cheerio.load(html);
+        const $ = cheerio.load(xml, { xmlMode: true });
         const deals: RawDeal[] = [];
 
-        $("td.subject a.subject_link").each((i, el) => {
+        $("item").each((i, el) => {
             if (i >= 15) return;
-            const title = $(el).text().trim();
+            const title = $(el).find("title").text().trim();
             if (!title || title.length < 5) return;
-            const href = $(el).attr("href") || "";
-            if (!href) return;
-            const link = href.startsWith("http") ? href : "https://bbs.ruliweb.com" + href;
+            let link = $(el).find("link").text().trim();
+            if (!link) link = $(el).find("guid").text().trim();
+            // RSS URL에 .rss가 섞인 경우 정리
+            link = link.replace("/board/1020.rss/", "/board/1020/");
+            if (!link || !link.startsWith("http")) return;
             const mallMatch = title.match(/\[([^\]]+)\]/);
             deals.push({ title, link, mallName: mallMatch?.[1] || "루리웹", source: "루리웹" });
         });
@@ -327,10 +329,12 @@ export async function GET() {
         }
 
         const results: string[] = [];
+        let dedupCount = 0;
+        let gptFilterCount = 0;
 
         for (const deal of allDeals) {
             const exists = await prisma.product.findFirst({ where: { sourceUrl: deal.link } });
-            if (exists) continue;
+            if (exists) { dedupCount++; continue; }
 
             // OpenAI: IT 핫딜 여부 판별
             let aiData: any = {};
@@ -366,7 +370,7 @@ export async function GET() {
                 continue;
             }
 
-            if (!aiData.isIT) continue;
+            if (!aiData.isIT) { gptFilterCount++; continue; }
 
             // ── 할인 정보 검증 ────────────────────────────────────
             // 가격 정보도 없고 할인 설명도 없으면 정가 판매 → 제외
@@ -457,6 +461,7 @@ export async function GET() {
             sourceStats,
             expired: expired.count,
             totalActive,
+            debug: { dedupCount, gptFilterCount },
         });
     } catch (error: any) {
         console.error("Scrape Error:", error);
