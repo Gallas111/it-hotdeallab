@@ -466,8 +466,8 @@ function interleaveDeals(...sources: RawDeal[][]): RawDeal[] {
 // 딜 유효성 검사 (품절/404 여부 확인)
 // ═══════════════════════════════════════════════════════════
 async function isDealExpired(affiliateLink: string): Promise<boolean> {
-    // 커뮤니티 링크는 판단 불가 → 보존
-    if (!isShopLink(affiliateLink)) return false;
+    // 쇼핑몰 링크가 아닌 경우(= 링크 추출 실패한 불완전한 딜) → 삭제
+    if (!isShopLink(affiliateLink)) return true;
     try {
         const { data: html, status } = await axios.get(affiliateLink, {
             headers: HEADERS,
