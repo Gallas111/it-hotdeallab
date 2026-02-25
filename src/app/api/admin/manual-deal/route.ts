@@ -7,6 +7,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+const BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Cache-Control": "no-cache",
+};
+
 function generateSlug(title: string): string {
     const ascii = title.replace(/\[.*?\]/g, "").trim();
     return `${ascii.substring(0, 20).replace(/[^a-zA-Z0-9가-힣]/g, "-")}-${Date.now()}`;
@@ -26,68 +34,67 @@ function toCoupangAffiliateLink(url: string): string {
     }
 }
 
-// Playwright로 실제 브라우저에서 상품 정보 추출
-async function fetchWithBrowser(url: string): Promise<{
+// axios로 쿠팡 상품 정보 추출 (og 태그 + JSON-LD)
+async function fetchProductInfo(url: string): Promise<{
     title: string; imageUrl: string | null; rawPrice: string; finalUrl: string;
 }> {
-    let browser: any = null;
     try {
-        const { chromium } = await import("playwright-core");
+        const response = await axios.get(url, {
+            headers: BROWSER_HEADERS,
+            timeout: 15000,
+            maxRedirects: 10,
+            responseType: "text",
+        });
 
-        // Vercel 프로덕션: sparticuz chromium, 로컬: 시스템 chromium
-        if (process.env.VERCEL) {
-            const chromiumBin = await import("@sparticuz/chromium");
-            browser = await chromium.launch({
-                args: chromiumBin.default.args,
-                executablePath: await chromiumBin.default.executablePath(),
-                headless: true,
-            });
-        } else {
-            browser = await chromium.launch({ headless: true });
+        const html: string = response.data;
+        const finalUrl: string = response.request?.res?.responseUrl || url;
+
+        // og:title 추출
+        const titleMatch =
+            html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) ||
+            html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
+        const rawTitle = titleMatch?.[1] || "";
+        const title = rawTitle.replace(/\s*[:\-|]\s*쿠팡.*$/i, "").trim();
+
+        // og:image 추출
+        const imageMatch =
+            html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
+            html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+        const imageUrl = imageMatch?.[1] || null;
+
+        // 가격 추출: JSON-LD 우선
+        let rawPrice = "";
+        const ldMatch = html.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+        if (ldMatch) {
+            for (const block of ldMatch) {
+                const inner = block.replace(/<\/?script[^>]*>/gi, "");
+                try {
+                    const json = JSON.parse(inner);
+                    const price = json?.offers?.price || json?.offers?.[0]?.price;
+                    if (price) { rawPrice = String(price); break; }
+                } catch { /* skip */ }
+            }
         }
 
-        const page = await browser.newPage();
-        await page.setExtraHTTPHeaders({
-            "Accept-Language": "ko-KR,ko;q=0.9",
-        });
+        // JSON-LD 없으면 페이지 내 패턴 검색
+        if (!rawPrice) {
+            const pricePatterns = [
+                /"salePrice"\s*:\s*"?([\d,]+)"?/,
+                /"finalPrice"\s*:\s*"?([\d,]+)"?/,
+                /"price"\s*:\s*"?([\d,]+)"?/,
+                /class="[^"]*total-price[^"]*"[^>]*>[^<]*<strong[^>]*>([\d,]+)/,
+            ];
+            for (const pat of pricePatterns) {
+                const m = html.match(pat);
+                if (m) { rawPrice = m[1].replace(/,/g, ""); break; }
+            }
+        }
 
-        // 페이지 로드 (리다이렉트 자동 추적)
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
-        const finalUrl = page.url();
-
-        // og:title / og:image 추출
-        const title = await page.$eval(
-            'meta[property="og:title"]',
-            (el: any) => el.getAttribute("content") || ""
-        ).catch(() => "");
-
-        const imageUrl = await page.$eval(
-            'meta[property="og:image"]',
-            (el: any) => el.getAttribute("content") || ""
-        ).catch(() => null);
-
-        // 가격 추출 (쿠팡 전용 셀렉터)
-        const rawPrice = await page.$eval(
-            ".total-price strong",
-            (el: any) => el.textContent?.trim() || ""
-        ).catch(async () => {
-            return await page.$eval(
-                '[class*="price"] strong',
-                (el: any) => el.textContent?.trim() || ""
-            ).catch(() => "");
-        });
-
-        return {
-            title: title.replace(/ [-|] 쿠팡.*/, "").trim(),
-            imageUrl: imageUrl || null,
-            rawPrice,
-            finalUrl,
-        };
-    } catch (e) {
-        console.error("Browser fetch error:", e);
+        console.log(`[manual-deal] title="${title}" price="${rawPrice}" finalUrl="${finalUrl}"`);
+        return { title, imageUrl, rawPrice, finalUrl };
+    } catch (e: any) {
+        console.error("fetchProductInfo error:", e.message);
         return { title: "", imageUrl: null, rawPrice: "", finalUrl: url };
-    } finally {
-        if (browser) await browser.close();
     }
 }
 
@@ -116,8 +123,8 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: "affiliateLink 필요" }, { status: 400 });
         }
 
-        // Playwright로 실제 브라우저에서 정보 추출
-        const { title: pageTitle, imageUrl: pageImage, rawPrice, finalUrl } = await fetchWithBrowser(affiliateLink);
+        // 상품 정보 추출
+        const { title: pageTitle, imageUrl: pageImage, rawPrice, finalUrl } = await fetchProductInfo(affiliateLink);
 
         // 이미지 없으면 네이버쇼핑으로 폴백
         let imageUrl = pageImage;
@@ -130,20 +137,22 @@ export async function POST(request: Request) {
             ? affiliateLink
             : toCoupangAffiliateLink(affiliateLink);
 
-        const titleForAI = pageTitle || "쿠팡 상품";
+        const titleForAI = pageTitle || "";
+        if (!titleForAI) {
+            return NextResponse.json({ success: false, error: "상품 정보를 가져오지 못했습니다. 쿠팡 직접 링크(www.coupang.com/vp/...)를 사용해보세요." }, { status: 400 });
+        }
 
         // Claude AI 분석
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
         const message = await anthropic.messages.create({
             model: "claude-sonnet-4-6",
             max_tokens: 1200,
-            system: `IT·가전·스마트홈 핫딜 전문 큐레이터.
-상품명과 가격 기반으로 핫딜 정보를 생성하라.
-반드시 JSON만 반환 (다른 텍스트 절대 금지):
+            system: `핫딜 큐레이터. 상품명과 가격으로 핫딜 정보 생성.
+반드시 JSON만 반환:
 {"refinedTitle":"제목(50자이내)","category":"골드박스|Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"300자이상 상세설명"}`,
             messages: [{
                 role: "user",
-                content: `상품명: ${titleForAI}\n가격: ${rawPrice || "정보 없음"}\n링크: ${finalUrl}`,
+                content: `상품명: ${titleForAI}\n가격: ${rawPrice ? rawPrice + "원" : "정보 없음"}\n링크: ${finalUrl}`,
             }],
         });
 
