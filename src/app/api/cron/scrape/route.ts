@@ -463,16 +463,65 @@ function interleaveDeals(...sources: RawDeal[][]): RawDeal[] {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 딜 유효성 검사 (품절/404 여부 확인)
+// ═══════════════════════════════════════════════════════════
+async function isDealExpired(affiliateLink: string): Promise<boolean> {
+    // 커뮤니티 링크는 판단 불가 → 보존
+    if (!isShopLink(affiliateLink)) return false;
+    try {
+        const { data: html, status } = await axios.get(affiliateLink, {
+            headers: HEADERS,
+            timeout: 4000,
+            maxRedirects: 3,
+            validateStatus: (s) => s < 500,
+        });
+        if (status === 404) return true;
+        const SOLD_OUT = [
+            "품절", "일시품절", "판매종료", "판매완료", "구매불가",
+            "soldout", "sold out", "out of stock",
+            "상품이 존재하지 않", "삭제된 상품", "존재하지 않는 상품",
+        ];
+        const lower = (html as string).toLowerCase();
+        return SOLD_OUT.some(kw => lower.includes(kw.toLowerCase()));
+    } catch {
+        // 타임아웃·봇 차단 등 → 판단 불가, 보존
+        return false;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 // 메인 핸들러
 // ═══════════════════════════════════════════════════════════
 async function runScrape() {
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
-    // ── 1. 만료 딜 자동 삭제 (3일 이상 된 핫딜) ─────────────
-    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-    const expired = await prisma.product.deleteMany({
-        where: { createdAt: { lt: threeDaysAgo } },
+    // ── 1. 만료 딜 처리 ──────────────────────────────────────
+    // 7일 이상 → 무조건 삭제
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const hardExpired = await prisma.product.deleteMany({
+        where: { createdAt: { lt: sevenDaysAgo } },
     });
+
+    // 3~7일 → 쇼핑몰 페이지 품절/404 확인 후 삭제
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    const candidates = await prisma.product.findMany({
+        where: { createdAt: { lt: threeDaysAgo, gte: sevenDaysAgo } },
+        select: { id: true, affiliateLink: true },
+        take: 10,
+    });
+    let softDeleted = 0;
+    for (let i = 0; i < candidates.length; i += 5) {
+        const batch = candidates.slice(i, i + 5);
+        const checks = await Promise.allSettled(batch.map(p => isDealExpired(p.affiliateLink)));
+        const toDelete = batch
+            .filter((_, j) => checks[j].status === "fulfilled" && (checks[j] as PromiseFulfilledResult<boolean>).value)
+            .map(p => p.id);
+        if (toDelete.length > 0) {
+            await prisma.product.deleteMany({ where: { id: { in: toDelete } } });
+            softDeleted += toDelete.length;
+        }
+    }
+    const expired = { count: hardExpired.count + softDeleted };
 
     const [clienDeals, ppomppuDeals, ruliwebDeals, naverDeals] = await Promise.all([
         scrapeClien(),
