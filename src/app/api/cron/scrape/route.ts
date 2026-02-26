@@ -416,7 +416,54 @@ async function scrapeQuasarzone(): Promise<RawDeal[]> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 소스 5: 네이버 쇼핑 API (병렬 처리)
+// 소스 5: 아카라이브 핫딜 채널
+// ═══════════════════════════════════════════════════════════
+async function scrapeArcaLive(): Promise<RawDeal[]> {
+    try {
+        const { data: html } = await axios.get(
+            "https://arca.live/b/hotdeal",
+            {
+                headers: {
+                    ...HEADERS,
+                    Referer: "https://arca.live/",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                },
+                timeout: 10000,
+            }
+        );
+        const $ = cheerio.load(html);
+        const deals: RawDeal[] = [];
+        const seen = new Set<string>();
+
+        $(".vrow").each((_, el) => {
+            if (deals.length >= 15) return;
+            // 공지·광고 스킵
+            if ($(el).hasClass("notice") || $(el).hasClass("head")) return;
+
+            const titleEl = $(el).find(".title a, .col-title a").first();
+            const href = titleEl.attr("href") || "";
+            if (!href || !href.includes("/b/hotdeal/")) return;
+
+            const title = titleEl.text().replace(/\s+/g, " ").trim();
+            if (!title || title.length < 5) return;
+
+            const link = href.startsWith("http") ? href : "https://arca.live" + href.split("?")[0];
+            if (seen.has(link)) return;
+            seen.add(link);
+
+            const badge = $(el).find(".badge").first().text().trim();
+            const mallName = badge || "아카라이브";
+            deals.push({ title: badge ? `[${badge}] ${title}` : title, link, mallName, source: "아카라이브" });
+        });
+
+        return deals;
+    } catch {
+        return [];
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 소스 6: 네이버 쇼핑 API (병렬 처리)
 // ═══════════════════════════════════════════════════════════
 async function scrapeNaverShopping(): Promise<RawDeal[]> {
     const clientId = process.env.NAVER_CLIENT_ID;
@@ -544,20 +591,22 @@ async function runScrape() {
     }
     const expired = { count: hardExpired.count + softDeleted };
 
-    const [clienDeals, ppomppuDeals, ppomppuOverseaDeals, quasarzoneDeals, naverDeals] = await Promise.all([
+    const [clienDeals, ppomppuDeals, ppomppuOverseaDeals, quasarzoneDeals, arcaDeals, naverDeals] = await Promise.all([
         scrapeClien(),
         scrapePpomppu(),
         scrapePpomppuOversea(),
         scrapeQuasarzone(),
+        scrapeArcaLive(),
         scrapeNaverShopping(),
     ]);
 
-    const allDeals = interleaveDeals(clienDeals, ppomppuDeals, ppomppuOverseaDeals, quasarzoneDeals, naverDeals);
+    const allDeals = interleaveDeals(clienDeals, ppomppuDeals, ppomppuOverseaDeals, quasarzoneDeals, arcaDeals, naverDeals);
     const sourceStats = {
         클리앙: clienDeals.length,
         뽐뿌: ppomppuDeals.length,
         해외뽐뿌: ppomppuOverseaDeals.length,
         퀘이사존: quasarzoneDeals.length,
+        아카라이브: arcaDeals.length,
         네이버쇼핑: naverDeals.length,
     };
 
