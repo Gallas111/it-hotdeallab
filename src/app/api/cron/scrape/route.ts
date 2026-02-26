@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import axios from "axios";
 import * as cheerio from "cheerio";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -443,7 +443,7 @@ async function isDealExpired(affiliateLink: string): Promise<boolean> {
 // 메인 핸들러
 // ═══════════════════════════════════════════════════════════
 async function runScrape() {
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+    const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
     // ── 1. 만료 딜 처리 ──────────────────────────────────────
     // 7일 이상 → 무조건 삭제
@@ -501,10 +501,10 @@ async function runScrape() {
         // Claude: IT 핫딜 여부 판별
         let aiData: any = {};
         try {
-            const message = await anthropic.messages.create({
-                model: "claude-sonnet-4-6",
-                max_tokens: 1000,
-                system: `IT·가전·스마트홈 핫딜 전문 큐레이터. 아래 두 조건을 모두 충족해야만 등록.
+            const response = await genai.models.generateContent({
+                model: "gemini-2.5-flash-lite",
+                config: {
+                    systemInstruction: `IT·가전·스마트홈 핫딜 전문 큐레이터. 아래 두 조건을 모두 충족해야만 등록.
 
 [등록 가능 제품군]
 - IT/전자기기: 노트북, 스마트폰, 태블릿, 모니터, 이어폰, 키보드, 마우스, SSD, 그래픽카드 등
@@ -525,13 +525,10 @@ async function runScrape() {
 반드시 JSON만 반환. 조건 미충족: {"isIT":false}
 조건 충족 시:
 {"isIT":true,"refinedTitle":"가격 혜택 강조 제목(50자이내)","category":"골드박스|Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄(예:20%할인/역대최저/오늘만특가)","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"500자이상 상세설명"}`,
-                messages: [
-                    { role: "user", content: `출처:${deal.source} 제목:${deal.title}` },
-                ],
+                },
+                contents: `출처:${deal.source} 제목:${deal.title}`,
             });
-            const block = message.content[0];
-            if (block.type !== "text") throw new Error("unexpected content type");
-            const raw = block.text.trim();
+            const raw = (response.text ?? "").trim();
             const jsonMatch = raw.match(/\{[\s\S]*\}/);
             if (!jsonMatch) throw new Error("no JSON in response");
             aiData = JSON.parse(jsonMatch[0]);
@@ -626,8 +623,8 @@ export async function GET(request: Request) {
         }
     }
 
-    if (!process.env.ANTHROPIC_API_KEY) {
-        return NextResponse.json({ error: "ANTHROPIC_API_KEY 환경변수 미설정" }, { status: 500 });
+    if (!process.env.GEMINI_API_KEY) {
+        return NextResponse.json({ error: "GEMINI_API_KEY 환경변수 미설정" }, { status: 500 });
     }
 
     // 즉시 202 응답 후 백그라운드에서 크롤링 처리 (cron-job.org 30초 타임아웃 우회)

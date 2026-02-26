@@ -10,7 +10,7 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.78.0",
+    "@google/genai": "^1.43.0",
     "@prisma/adapter-pg": "^7.4.1",
     "@prisma/client": "^7.4.1",
     "@vercel/functions": "^3.4.3",

@@ -3,7 +3,7 @@ import * as https from "node:https";
 import * as http from "node:http";
 import * as zlib from "node:zlib";
 import axios from "axios";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 import { prisma } from "@/lib/prisma";
 import { getCoupangProductInfo } from "@/lib/coupang-scraper";
 
@@ -302,23 +302,19 @@ export async function POST(request: Request) {
             }, { status: 400 });
         }
 
-        // 5. Claude AI 분석
-        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
-        const message = await anthropic.messages.create({
-            model: "claude-sonnet-4-6",
-            max_tokens: 1200,
-            system: `핫딜 큐레이터. 상품명과 가격으로 핫딜 정보 생성.
+        // 5. Gemini AI 분석
+        const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+        const response = await genai.models.generateContent({
+            model: "gemini-2.5-flash-lite",
+            config: {
+                systemInstruction: `핫딜 큐레이터. 상품명과 가격으로 핫딜 정보 생성.
 반드시 JSON만 반환:
 {"refinedTitle":"제목(50자이내)","category":"골드박스|Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"300자이상 상세설명"}`,
-            messages: [{
-                role: "user",
-                content: `상품명: ${pageTitle}\n현재가: ${rawPrice ? rawPrice + "원" : "정보 없음"}\n정가: ${rawOriginalPrice ? rawOriginalPrice + "원" : "정보 없음"}${webResult.discountPercent > 0 && !rawOriginalPrice ? `\n할인율 힌트: ${webResult.discountPercent}%` : ""}\n링크: ${productUrl}`,
-            }],
+            },
+            contents: `상품명: ${pageTitle}\n현재가: ${rawPrice ? rawPrice + "원" : "정보 없음"}\n정가: ${rawOriginalPrice ? rawOriginalPrice + "원" : "정보 없음"}${webResult.discountPercent > 0 && !rawOriginalPrice ? `\n할인율 힌트: ${webResult.discountPercent}%` : ""}\n링크: ${productUrl}`,
         });
 
-        const block = message.content[0];
-        if (block.type !== "text") throw new Error("AI 응답 오류");
-        const raw = block.text.trim();
+        const raw = (response.text ?? "").trim();
         const jsonMatch = raw.match(/\{[\s\S]*\}/);
         if (!jsonMatch) throw new Error(`AI 응답 파싱 실패: ${raw.substring(0, 100)}`);
         const aiData = JSON.parse(jsonMatch[0]);

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import axios from "axios";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,10 +47,10 @@ function extractFunction(code: string, funcName: string): string {
 
 export async function POST(request: Request) {
     const githubToken = process.env.GITHUB_TOKEN;
-    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+    const geminiKey = process.env.GEMINI_API_KEY;
 
-    if (!githubToken || !anthropicKey) {
-        return NextResponse.json({ error: "GITHUB_TOKEN 또는 ANTHROPIC_API_KEY 미설정" }, { status: 500 });
+    if (!githubToken || !geminiKey) {
+        return NextResponse.json({ error: "GITHUB_TOKEN 또는 GEMINI_API_KEY 미설정" }, { status: 500 });
     }
 
     const { source } = await request.json();
@@ -93,13 +93,10 @@ export async function POST(request: Request) {
         }
 
         // ── 4. Claude에게 수정 코드 요청 ────────────────────────────
-        const anthropic = new Anthropic({ apiKey: anthropicKey });
-        const message = await anthropic.messages.create({
-            model: "claude-sonnet-4-6",
-            max_tokens: 2000,
-            messages: [{
-                role: "user",
-                content: `웹 스크레이퍼가 고장났습니다. 아래 함수가 0개의 결과를 반환하고 있습니다. 웹사이트의 HTML 구조가 변경된 것이 원인입니다.
+        const genai = new GoogleGenAI({ apiKey: geminiKey });
+        const response = await genai.models.generateContent({
+            model: "gemini-2.5-flash-lite",
+            contents: `웹 스크레이퍼가 고장났습니다. 아래 함수가 0개의 결과를 반환하고 있습니다. 웹사이트의 HTML 구조가 변경된 것이 원인입니다.
 
 현재 함수 코드:
 \`\`\`typescript
@@ -120,10 +117,9 @@ HTML을 분석하여 핫딜/세일 게시글 목록을 올바르게 추출하는
 - axios와 cheerio($)는 이미 import됨
 - try/catch로 에러 처리, 실패 시 [] 반환
 - 코드만 반환 (설명 없이, 마크다운 코드블록 없이)`,
-            }],
         });
 
-        const newFunc = (message.content[0] as any).text.trim();
+        const newFunc = (response.text ?? "").trim();
 
         // ── 5. 파일에서 함수 교체 ───────────────────────────────────
         const newCode = currentCode.replace(currentFunc, newFunc);
