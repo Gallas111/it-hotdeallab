@@ -13,11 +13,11 @@ interface DealCardProps {
         mallName: string;
         category: string;
         aiSummary: string;
-        createdAt: Date;
+        createdAt: Date | string;
     };
 }
 
-function timeAgo(date: Date): string {
+function timeAgo(date: Date | string): string {
     const diff = Date.now() - new Date(date).getTime();
     const m = Math.floor(diff / 60000);
     if (m < 1) return "방금";

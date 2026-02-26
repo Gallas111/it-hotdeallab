@@ -1,24 +1,19 @@
-import DealCard from "@/components/DealCard";
-import { prisma } from "@/lib/prisma";
+import { Suspense } from "react";
+import DealListClient from "@/components/DealListClient";
+import SortSelect from "@/components/SortSelect";
+import { queryDeals, parseSortKey, PAGE_SIZE } from "@/lib/deals";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ category?: string; q?: string }>;
+  searchParams: Promise<{ category?: string; q?: string; sort?: string }>;
 }) {
-  const { category, q } = await searchParams;
+  const { category, q, sort } = await searchParams;
+  const sortKey = parseSortKey(sort);
 
-  const deals = await prisma.product.findMany({
-    where: {
-      isActive: true,
-      ...(category && category !== "전체" ? { category } : {}),
-      ...(q ? { title: { contains: q, mode: "insensitive" } } : {}),
-    },
-    orderBy: { createdAt: "desc" },
-    take: 40,
-  });
+  const { deals, hasMore } = await queryDeals({ category, q, sort: sortKey });
 
   const sectionTitle = q
     ? `"${q}" 검색 결과`
@@ -41,37 +36,21 @@ export default async function Home({
           <h2 style={{ fontSize: 15, fontWeight: 800, color: "var(--foreground)", letterSpacing: "-0.02em" }}>
             {sectionTitle}
           </h2>
-          {deals.length > 0 && (
-            <span className="badge badge-gray">{deals.length}개</span>
-          )}
         </div>
-        <span style={{ fontSize: 12, color: "var(--muted)" }}>최신순</span>
+        <Suspense fallback={<span style={{ fontSize: 12, color: "var(--muted)" }}>최신순</span>}>
+          <SortSelect />
+        </Suspense>
       </div>
 
-      {/* 딜 리스트 */}
-      {deals.length > 0 ? (
-        <div className="card" style={{ overflow: "hidden" }}>
-          {deals.map(deal => (
-            <DealCard key={deal.id} product={deal} />
-          ))}
-        </div>
-      ) : (
-        <div className="card" style={{
-          padding: "60px 20px", textAlign: "center",
-          display: "flex", flexDirection: "column", alignItems: "center", gap: 12,
-        }}>
-          <span style={{ fontSize: 40 }}>🔍</span>
-          <p style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)" }}>
-            등록된 핫딜이 없습니다
-          </p>
-          <p style={{ fontSize: 13, color: "var(--muted)" }}>
-            <a href="/admin" style={{ color: "var(--primary)", fontWeight: 700, textDecoration: "none" }}>
-              관리 페이지
-            </a>
-            에서 크롤링을 실행해보세요
-          </p>
-        </div>
-      )}
+      {/* 딜 리스트 (무한스크롤) */}
+      <DealListClient
+        initialDeals={JSON.parse(JSON.stringify(deals))}
+        hasMore={hasMore}
+        category={category}
+        q={q}
+        sort={sortKey}
+        pageSize={PAGE_SIZE}
+      />
     </div>
   );
 }
