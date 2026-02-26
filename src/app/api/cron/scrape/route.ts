@@ -17,11 +17,16 @@ const HEADERS = {
 };
 
 const SHOP_DOMAINS = [
+    // 국내
     "coupang.com", "link.coupang.com", "11st.co.kr",
     "gmarket.co.kr", "auction.co.kr", "interpark.com",
     "ssg.com", "lotteon.com", "danawa.com",
-    "amazon.com", "amazon.co.jp", "aliexpress.com",
     "tmon.co.kr", "smartstore.naver.com", "brand.naver.com",
+    // 해외직구
+    "amazon.com", "amazon.co.jp", "amazon.co.uk", "amazon.de",
+    "aliexpress.com", "aliexpress.kr",
+    "ebay.com", "newegg.com", "bhphotovideo.com",
+    "iherb.com", "rakuten.co.jp",
 ];
 
 const isShopLink = (url: string) => SHOP_DOMAINS.some(d => url.includes(d));
@@ -344,6 +349,72 @@ async function scrapePpomppu(): Promise<RawDeal[]> {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 소스 3: 뽐뿌 해외뽐뿌 (RSS 피드 - 해외직구 전용)
+// ═══════════════════════════════════════════════════════════
+async function scrapePpomppuOversea(): Promise<RawDeal[]> {
+    try {
+        const { data: xml } = await axios.get(
+            "https://www.ppomppu.co.kr/rss.php?id=ppomppu4",
+            { headers: { ...HEADERS, Referer: "https://www.ppomppu.co.kr/" }, timeout: 10000 }
+        );
+        const $ = cheerio.load(xml, { xmlMode: true });
+        const deals: RawDeal[] = [];
+
+        $("item").each((i, el) => {
+            if (i >= 20) return;
+            const title = $(el).find("title").text().trim();
+            if (!title || title.length < 5) return;
+            let link = $(el).find("link").text().trim();
+            if (!link) link = $(el).find("guid").text().trim();
+            if (!link || !link.startsWith("http")) return;
+            const mallMatch = title.match(/\[([^\]]+)\]/);
+            deals.push({ title, link, mallName: mallMatch?.[1] || "해외직구", source: "해외뽐뿌" });
+        });
+
+        return deals;
+    } catch {
+        return [];
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 소스 4: 퀘이사존 핫딜
+// ═══════════════════════════════════════════════════════════
+async function scrapeQuasarzone(): Promise<RawDeal[]> {
+    try {
+        const { data: html } = await axios.get(
+            "https://quasarzone.com/bbs/qb_saleinfo",
+            { headers: { ...HEADERS, Referer: "https://quasarzone.com/" }, timeout: 10000 }
+        );
+        const $ = cheerio.load(html);
+        const deals: RawDeal[] = [];
+        const seen = new Set<string>();
+
+        $("a.subject-link").each((_, el) => {
+            if (deals.length >= 15) return;
+            const href = $(el).attr("href") || "";
+            if (!href.includes("/views/")) return;
+            const title = $(el).find(".ellipsis-with-reply-cnt").text().replace(/\s+/g, " ").trim();
+            if (!title || title.length < 5) return;
+            const link = href.startsWith("http") ? href : "https://quasarzone.com" + href;
+            if (seen.has(link)) return;
+            seen.add(link);
+
+            // 종료된 딜 스킵
+            const row = $(el).closest("tr, li, div.market-info-list-cont");
+            if (row.find(".label").text().includes("종료")) return;
+
+            const category = row.find("span.category").text().trim();
+            const mallName = row.find("span.brand").text().trim() || "퀘이사존";
+            deals.push({ title: `[${category || mallName}] ${title}`, link, mallName, source: "퀘이사존" });
+        });
+
+        return deals;
+    } catch {
+        return [];
+    }
+}
+
 // ═══════════════════════════════════════════════════════════
 // 소스 5: 네이버 쇼핑 API (병렬 처리)
 // ═══════════════════════════════════════════════════════════
@@ -473,16 +544,20 @@ async function runScrape() {
     }
     const expired = { count: hardExpired.count + softDeleted };
 
-    const [clienDeals, ppomppuDeals, naverDeals] = await Promise.all([
+    const [clienDeals, ppomppuDeals, ppomppuOverseaDeals, quasarzoneDeals, naverDeals] = await Promise.all([
         scrapeClien(),
         scrapePpomppu(),
+        scrapePpomppuOversea(),
+        scrapeQuasarzone(),
         scrapeNaverShopping(),
     ]);
 
-    const allDeals = interleaveDeals(clienDeals, ppomppuDeals, naverDeals);
+    const allDeals = interleaveDeals(clienDeals, ppomppuDeals, ppomppuOverseaDeals, quasarzoneDeals, naverDeals);
     const sourceStats = {
         클리앙: clienDeals.length,
         뽐뿌: ppomppuDeals.length,
+        해외뽐뿌: ppomppuOverseaDeals.length,
+        퀘이사존: quasarzoneDeals.length,
         네이버쇼핑: naverDeals.length,
     };
 
@@ -522,9 +597,13 @@ async function runScrape() {
 - 소프트웨어·게임·구독 서비스
 - 식품·의류·생활용품 등 전자/가전과 무관한 제품
 
+[해외직구 참고]
+- 출처가 해외뽐뿌/퀘이사존이면서 Amazon/AliExpress/eBay/Newegg 등 해외 쇼핑몰 상품이면 category를 "해외직구"로 분류
+- 달러($)/엔(¥)/위안(元) 가격은 원화 환산 없이 그대로 표기
+
 반드시 JSON만 반환. 조건 미충족: {"isIT":false}
 조건 충족 시:
-{"isIT":true,"refinedTitle":"가격 혜택 강조 제목(50자이내)","category":"골드박스|Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄(예:20%할인/역대최저/오늘만특가)","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"500자이상 상세설명"}`,
+{"isIT":true,"refinedTitle":"가격 혜택 강조 제목(50자이내)","category":"골드박스|Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전|해외직구 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄(예:20%할인/역대최저/오늘만특가)","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"500자이상 상세설명"}`,
                 },
                 contents: `출처:${deal.source} 제목:${deal.title}`,
             });
@@ -603,7 +682,7 @@ async function runScrape() {
 
     await sendTelegramAlert(results);
 
-    const communitySources = ["클리앙", "뽐뿌"];
+    const communitySources = ["클리앙", "뽐뿌", "해외뽐뿌"];
     const hasBrokenSource = communitySources.some(src => (sourceStats as any)[src] === 0);
     const totalActive = await prisma.product.count({ where: { isActive: true } });
     if (hasBrokenSource || totalActive < 5) {

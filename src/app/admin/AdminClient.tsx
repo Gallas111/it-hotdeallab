@@ -325,7 +325,7 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
 
     const filteredProducts = products.filter(p => filterCategory === "전체" || p.category === filterCategory);
 
-    const CATS = ["전체", "골드박스", "Apple", "삼성/LG", "노트북/PC", "모니터/주변기기", "음향/스마트기기", "생활가전"];
+    const CATS = ["전체", "골드박스", "Apple", "삼성/LG", "노트북/PC", "모니터/주변기기", "음향/스마트기기", "생활가전", "해외직구"];
 
     return (
         <div className="mx-auto max-w-4xl px-4 py-10 space-y-8">
@@ -373,6 +373,7 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
                         <option value="모니터/주변기기">🖥 모니터/주변기기</option>
                         <option value="음향/스마트기기">🎧 음향/스마트기기</option>
                         <option value="생활가전">🏠 생활가전</option>
+                        <option value="해외직구">🌍 해외직구</option>
                     </select>
                     <input
                         type="url"
