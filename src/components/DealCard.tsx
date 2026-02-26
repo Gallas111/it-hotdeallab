@@ -12,6 +12,7 @@ interface DealCardProps {
         discountPercent: number;
         mallName: string;
         category: string;
+        aiSummary: string;
         createdAt: Date;
     };
 }
@@ -90,6 +91,10 @@ export default function DealCard({ product }: DealCardProps) {
                                 letterSpacing: "-0.03em",
                             }}>
                                 {product.salePrice.toLocaleString()}원
+                            </span>
+                        ) : product.aiSummary ? (
+                            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--primary)" }}>
+                                {product.aiSummary.length > 30 ? product.aiSummary.substring(0, 30) + "…" : product.aiSummary}
                             </span>
                         ) : (
                             <span style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>

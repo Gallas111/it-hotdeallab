@@ -219,15 +219,20 @@ async function fetchNaverFallbackImage(title: string): Promise<string | null> {
     const clientSecret = process.env.NAVER_CLIENT_SECRET;
     if (!clientId || !clientSecret) return null;
 
-    // 제목에서 쇼핑몰명·가격 제거하고 핵심 키워드만 추출
+    // 제목에서 쇼핑몰명·가격·특수문자 제거하고 핵심 키워드만 추출
     const keyword = title
         .replace(/\[.*?\]/g, "")
         .replace(/[0-9,]+원/g, "")
-        .replace(/[^\w\s가-힣]/g, " ")
+        .replace(/\$[\d,.]+/g, "")
+        .replace(/¥[\d,.]+/g, "")
+        .replace(/역대[가최]*/g, "")
+        .replace(/최저가|특가|할인|초특가|오픈박스|리퍼/g, "")
+        .replace(/[^\w\s가-힣a-zA-Z]/g, " ")
+        .replace(/\s+/g, " ")
         .trim()
-        .substring(0, 30);
+        .substring(0, 40);
 
-    if (keyword.length < 3) return null;
+    if (keyword.length < 2) return null;
 
     try {
         const { data } = await axios.get("https://openapi.naver.com/v1/search/shop.json", {
@@ -647,8 +652,10 @@ async function runScrape() {
 - 식품·의류·생활용품 등 전자/가전과 무관한 제품
 
 [해외직구 참고]
-- 출처가 해외뽐뿌/퀘이사존이면서 Amazon/AliExpress/eBay/Newegg 등 해외 쇼핑몰 상품이면 category를 "해외직구"로 분류
-- 달러($)/엔(¥)/위안(元) 가격은 원화 환산 없이 그대로 표기
+- 출처가 해외뽐뿌/퀘이사존이면서 Amazon/AliExpress/eBay/Newegg/Costco 등 해외 쇼핑몰 상품이면 category를 "해외직구"로 분류
+- 외화 가격은 반드시 원화(KRW)로 환산하여 숫자로 반환 (환율: $1≈1,450원, ¥100≈950원, €1≈1,550원)
+- 예: $18.9 → salePrice:27405, $899.99 → salePrice:1304985
+- 제목에 가격 힌트가 있으면 반드시 추출 (예: "1.5만원대" → salePrice:15000)
 
 반드시 JSON만 반환. 조건 미충족: {"isIT":false}
 조건 충족 시:
@@ -688,7 +695,11 @@ async function runScrape() {
         affiliateLink = toCoupangAffiliateLink(affiliateLink);
 
         if (!imageUrl) {
-            imageUrl = await fetchNaverFallbackImage(deal.title);
+            // AI가 정제한 제목으로 먼저 시도, 실패하면 원본 제목으로 재시도
+            imageUrl = await fetchNaverFallbackImage(aiData.refinedTitle || deal.title);
+            if (!imageUrl && aiData.refinedTitle) {
+                imageUrl = await fetchNaverFallbackImage(deal.title);
+            }
         }
 
         const originalPrice = Number(aiData.originalPrice) || 0;
