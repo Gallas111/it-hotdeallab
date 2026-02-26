@@ -3,8 +3,10 @@ import Link from "next/link";
 import Image from "next/image";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { getSimilarDeals } from "@/lib/deals";
 import ShareButtons from "@/components/ShareButtons";
 import ViewTracker from "@/components/ViewTracker";
+import ClickTracker from "@/components/ClickTracker";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +51,7 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
     const p = await getProductById(id);
     if (!p) notFound();
 
+    const similarDeals = await getSimilarDeals(p.id, p.category, 4);
     const pros = p.aiPros.split(",").map(s => s.trim()).filter(Boolean);
 
     const timeAgo = (() => {
@@ -204,9 +207,9 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
                 )}
 
                 {/* CTA 버튼 */}
-                <a href={p.affiliateLink} target="_blank" rel="noopener noreferrer" className="btn-primary">
+                <ClickTracker id={p.id} href={p.affiliateLink} target="_blank" rel="noopener noreferrer" className="btn-primary">
                     {p.mallName}에서 구매하기
-                </a>
+                </ClickTracker>
 
                 {/* 쿠팡 파트너스 공지 문구 (쿠팡 딜만 표시) */}
                 {p.affiliateLink.includes("coupang.com") && (
@@ -309,6 +312,80 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
                 </div>
             )}
 
+            {/* 비슷한 상품 추천 */}
+            {similarDeals.length > 0 && (
+                <div className="detail-card">
+                    <h2 style={{
+                        fontSize: 13, fontWeight: 800, color: "var(--primary)",
+                        letterSpacing: "0.05em", textTransform: "uppercase",
+                        marginBottom: 16, display: "flex", alignItems: "center", gap: 8,
+                    }}>
+                        <span style={{ width: 3, height: 16, background: "var(--primary)", borderRadius: 2, display: "inline-block" }} />
+                        비슷한 핫딜
+                    </h2>
+                    <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(2, 1fr)",
+                        gap: 12,
+                    }}>
+                        {similarDeals.map(deal => (
+                            <Link key={deal.id} href={`/deal/${deal.id}`} style={{
+                                display: "flex", gap: 10, alignItems: "center",
+                                padding: 10, borderRadius: 10,
+                                background: "var(--surface2)",
+                                border: "1px solid var(--border)",
+                                textDecoration: "none",
+                                transition: "border-color 0.15s",
+                            }}>
+                                {deal.imageUrl ? (
+                                    <Image
+                                        src={deal.imageUrl}
+                                        alt={deal.title}
+                                        width={48}
+                                        height={48}
+                                        style={{ borderRadius: 8, objectFit: "cover", flexShrink: 0 }}
+                                    />
+                                ) : (
+                                    <div style={{
+                                        width: 48, height: 48, borderRadius: 8,
+                                        background: "var(--border)",
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                        fontSize: 18, flexShrink: 0,
+                                    }}>🛒</div>
+                                )}
+                                <div style={{ minWidth: 0, flex: 1 }}>
+                                    <p style={{
+                                        fontSize: 12, fontWeight: 700,
+                                        color: "var(--foreground)",
+                                        lineHeight: 1.3,
+                                        display: "-webkit-box",
+                                        WebkitLineClamp: 1,
+                                        WebkitBoxOrient: "vertical",
+                                        overflow: "hidden",
+                                    }}>{deal.title}</p>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
+                                        {deal.salePrice > 0 && (
+                                            <span style={{ fontSize: 12, fontWeight: 900, color: "var(--primary)" }}>
+                                                {deal.salePrice.toLocaleString()}원
+                                            </span>
+                                        )}
+                                        {deal.discountPercent > 0 && (
+                                            <span style={{
+                                                fontSize: 10, fontWeight: 800,
+                                                color: "#ef4444",
+                                                background: "#fef2f2",
+                                                padding: "1px 5px",
+                                                borderRadius: 4,
+                                            }}>-{deal.discountPercent}%</span>
+                                        )}
+                                    </div>
+                                </div>
+                            </Link>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             {/* 모바일 고정 하단 CTA */}
             <div style={{
                 position: "fixed", bottom: 0, left: 0, right: 0,
@@ -327,10 +404,10 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
                         </p>
                     </div>
                 )}
-                <a href={p.affiliateLink} target="_blank" rel="noopener noreferrer"
+                <ClickTracker id={p.id} href={p.affiliateLink} target="_blank" rel="noopener noreferrer"
                     className="btn-primary" style={{ flex: 1, fontSize: 14, padding: "12px" }}>
                     구매하러 가기
-                </a>
+                </ClickTracker>
             </div>
         </div>
     );

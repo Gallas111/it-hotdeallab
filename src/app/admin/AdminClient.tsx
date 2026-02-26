@@ -11,6 +11,8 @@ type Product = {
     mallName: string;
     affiliateLink: string;
     imageUrl: string | null;
+    viewCount: number;
+    clickCount: number;
     createdAt: string;
 };
 
@@ -340,9 +342,10 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
             </div>
 
             {/* 통계 카드 */}
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-5 gap-3">
                 {[
                     { label: "전체 핫딜", value: products.length, color: "var(--primary)", bg: "rgba(99,102,241,0.07)" },
+                    { label: "CTA 클릭", value: products.reduce((sum, p) => sum + (p.clickCount || 0), 0), color: "#ec4899", bg: "rgba(236,72,153,0.07)" },
                     { label: "쇼핑몰 링크", value: products.length - clienCount, color: "#22c55e", bg: "rgba(34,197,94,0.07)" },
                     { label: "클리앙 링크", value: clienCount, color: "#f59e0b", bg: "rgba(245,158,11,0.07)" },
                     { label: "이미지 없음", value: noImageCount, color: "#a855f7", bg: "rgba(168,85,247,0.07)" },
@@ -603,6 +606,11 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
                                                 {p.affiliateLink.includes("clien.net") ? "클리앙" : "쇼핑몰"}
                                             </span>
                                             <span className="text-[11px] text-gray-300">{timeAgo}</span>
+                                            {(p.viewCount > 0 || p.clickCount > 0) && (
+                                                <span className="text-[10px] font-bold text-gray-400">
+                                                    👁{p.viewCount || 0} 🖱{p.clickCount || 0}
+                                                </span>
+                                            )}
                                         </div>
                                     )}
                                 </div>

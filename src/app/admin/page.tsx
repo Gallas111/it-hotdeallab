@@ -15,6 +15,8 @@ export default async function AdminPage() {
             mallName: true,
             affiliateLink: true,
             imageUrl: true,
+            viewCount: true,
+            clickCount: true,
             createdAt: true,
         },
     });

@@ -59,3 +59,16 @@ export async function queryDeals(params: {
 
     return { deals, hasMore };
 }
+
+export async function getSimilarDeals(currentId: string, category: string, limit = 4) {
+    return prisma.product.findMany({
+        where: {
+            isActive: true,
+            category,
+            id: { not: currentId },
+        },
+        orderBy: { viewCount: "desc" },
+        take: limit,
+        select: DEAL_SELECT,
+    });
+}
