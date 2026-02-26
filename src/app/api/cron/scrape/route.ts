@@ -269,6 +269,64 @@ async function fetchNaverFallbackImage(title: string): Promise<string | null> {
     return null;
 }
 
+// ─── 이미지 URL 유효성 검증 ──────────────────────────────────
+async function validateImageUrl(url: string | null): Promise<boolean> {
+    if (!url) return false;
+    try {
+        const res = await axios.head(url, {
+            timeout: 5000,
+            headers: { "User-Agent": HEADERS["User-Agent"] },
+            maxRedirects: 3,
+        });
+        const contentType = res.headers["content-type"] || "";
+        return res.status === 200 && contentType.startsWith("image/");
+    } catch {
+        return false;
+    }
+}
+
+// ─── 이미지 없는 기존 제품 자동 복구 ────────────────────────
+async function repairMissingImages() {
+    const products = await prisma.product.findMany({
+        where: {
+            isActive: true,
+            OR: [
+                { imageUrl: null },
+                { imageUrl: "" },
+            ],
+        },
+        select: { id: true, title: true, imageUrl: true },
+        orderBy: { createdAt: "desc" },
+        take: 5, // 매 실행마다 최대 5개씩 복구 (API 호출 절약)
+    });
+
+    if (products.length === 0) return;
+    console.log(`[Image Repair] ${products.length}개 제품 이미지 복구 시도`);
+
+    let repaired = 0;
+    for (const p of products) {
+        let newImageUrl = await fetchNaverFallbackImage(p.title);
+
+        // 검증: 실제 이미지인지 확인
+        if (newImageUrl && !(await validateImageUrl(newImageUrl))) {
+            newImageUrl = null;
+        }
+
+        if (newImageUrl) {
+            await prisma.product.update({
+                where: { id: p.id },
+                data: { imageUrl: newImageUrl },
+            });
+            repaired++;
+            console.log(`[Image Repair] ✓ ${p.title}`);
+        }
+    }
+
+    if (repaired > 0) {
+        console.log(`[Image Repair] ${repaired}/${products.length}개 복구 완료`);
+    }
+}
+
 // ─── 텔레그램 모니터링 경고 ──────────────────────────────────
 async function sendTelegramMonitorAlert(sourceStats: Record<string, number>, totalDeals: number) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -713,11 +771,21 @@ async function runScrape() {
 
         affiliateLink = toCoupangAffiliateLink(affiliateLink);
 
+        // 이미지 유효성 검증 (깨진 URL 방지)
+        if (imageUrl && !(await validateImageUrl(imageUrl))) {
+            console.log(`[Image] 깨진 이미지 감지, 네이버 폴백 시도: ${imageUrl}`);
+            imageUrl = null;
+        }
+
         if (!imageUrl) {
             // AI가 정제한 제목으로 먼저 시도, 실패하면 원본 제목으로 재시도
             imageUrl = await fetchNaverFallbackImage(aiData.refinedTitle || deal.title);
             if (!imageUrl && aiData.refinedTitle) {
                 imageUrl = await fetchNaverFallbackImage(deal.title);
+            }
+            // 폴백 이미지도 검증
+            if (imageUrl && !(await validateImageUrl(imageUrl))) {
+                imageUrl = null;
             }
         }
 
@@ -767,6 +835,9 @@ async function runScrape() {
     if (hasBrokenSource || totalActive < 5) {
         await sendTelegramMonitorAlert(sourceStats, totalActive);
     }
+
+    // 이미지 없는 기존 제품 자동 복구 (매 실행마다)
+    await repairMissingImages().catch(err => console.error("[Image Repair] Error:", err));
 
     console.log("Scrape done:", { expired: expired.count, added: results.length, sourceStats });
 }
