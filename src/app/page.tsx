@@ -5,6 +5,19 @@ import { queryDeals, parseSortKey, PAGE_SIZE } from "@/lib/deals";
 
 export const dynamic = "force-dynamic";
 
+const websiteJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": "IT핫딜랩",
+  "url": "https://ithotdealab.com",
+  "description": "매일 쏟아지는 IT/가전 핫딜, 한눈에.",
+  "potentialAction": {
+    "@type": "SearchAction",
+    "target": "https://ithotdealab.com/?q={search_term_string}",
+    "query-input": "required name=search_term_string",
+  },
+};
+
 export default async function Home({
   searchParams,
 }: {
@@ -23,6 +36,10 @@ export default async function Home({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
+      />
 
       {/* 섹션 헤더 */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>

@@ -2,10 +2,10 @@ import { prisma } from "./prisma";
 
 export const PAGE_SIZE = 20;
 
-export type SortKey = "newest" | "discount" | "price_asc" | "price_desc";
+export type SortKey = "newest" | "discount" | "price_asc" | "price_desc" | "popular";
 
 export function parseSortKey(raw?: string): SortKey {
-    const valid: SortKey[] = ["newest", "discount", "price_asc", "price_desc"];
+    const valid: SortKey[] = ["newest", "discount", "price_asc", "price_desc", "popular"];
     return valid.includes(raw as SortKey) ? (raw as SortKey) : "newest";
 }
 
@@ -14,6 +14,7 @@ function buildOrderBy(sort: SortKey) {
         case "discount": return { discountPercent: "desc" as const };
         case "price_asc": return { salePrice: "asc" as const };
         case "price_desc": return { salePrice: "desc" as const };
+        case "popular": return { viewCount: "desc" as const };
         default: return { createdAt: "desc" as const };
     }
 }
@@ -29,6 +30,7 @@ const DEAL_SELECT = {
     category: true,
     mallName: true,
     aiSummary: true,
+    viewCount: true,
     createdAt: true,
 } as const;
 

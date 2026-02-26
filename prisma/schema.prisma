@@ -22,6 +22,7 @@ model Product {
   aiTarget        String
   seoContent      String   // 1000자 이상의 SEO용 텍스트 저장
   affiliateLink   String   // 최종 쿠팡 파트너스 링크
+  viewCount       Int      @default(0)
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

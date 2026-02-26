@@ -4,6 +4,7 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import ShareButtons from "@/components/ShareButtons";
+import ViewTracker from "@/components/ViewTracker";
 
 export const dynamic = "force-dynamic";
 
@@ -74,28 +75,49 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
 
     const pageUrl = `https://ithotdealab.com/deal/${p.id}`;
 
-    const jsonLd = p.salePrice > 0 ? {
+    const priceValidUntil = new Date(new Date(p.createdAt).getTime() + 3 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
+    const productJsonLd: Record<string, unknown> = {
         "@context": "https://schema.org",
         "@type": "Product",
         "name": p.title,
+        "description": p.aiSummary,
         ...(p.imageUrl ? { "image": p.imageUrl } : {}),
-        "offers": {
+        "brand": { "@type": "Brand", "name": p.mallName },
+        "offers": p.salePrice > 0 ? {
             "@type": "Offer",
             "price": p.salePrice,
             "priceCurrency": "KRW",
             "availability": "https://schema.org/InStock",
+            "itemCondition": "https://schema.org/NewCondition",
             "url": p.affiliateLink,
-        },
-    } : null;
+            "seller": { "@type": "Organization", "name": p.mallName },
+            "priceValidUntil": priceValidUntil,
+        } : undefined,
+    };
+    if (!productJsonLd.offers) delete productJsonLd.offers;
+
+    const breadcrumbJsonLd = {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "홈", "item": "https://ithotdealab.com" },
+            { "@type": "ListItem", "position": 2, "name": p.category, "item": `https://ithotdealab.com/?category=${encodeURIComponent(p.category)}` },
+            { "@type": "ListItem", "position": 3, "name": p.title },
+        ],
+    };
 
     return (
         <div className="detail-wrap">
-            {jsonLd && (
-                <script
-                    type="application/ld+json"
-                    dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-                />
-            )}
+            <ViewTracker id={p.id} />
+            <script
+                type="application/ld+json"
+                dangerouslySetInnerHTML={{ __html: JSON.stringify(productJsonLd) }}
+            />
+            <script
+                type="application/ld+json"
+                dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+            />
             {/* 뒤로 가기 */}
             <Link href="/" style={{
                 display: "inline-flex", alignItems: "center", gap: 6,
@@ -111,6 +133,9 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
                 <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
                     <span className="badge badge-red">{p.category}</span>
                     <span className="badge badge-gray">{p.mallName}</span>
+                    {p.viewCount > 0 && (
+                        <span className="badge badge-gray">👁 {p.viewCount}회</span>
+                    )}
                     <span className="badge badge-gray" style={{ marginLeft: "auto" }}>{timeAgo} 등록</span>
                     {timeRemaining && (
                         <span style={{

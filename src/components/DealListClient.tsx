@@ -14,6 +14,7 @@ interface Deal {
     category: string;
     mallName: string;
     aiSummary: string;
+    viewCount: number;
     createdAt: string;
 }
 

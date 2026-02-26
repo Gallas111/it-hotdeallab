@@ -106,6 +106,8 @@ body {
 .badge-blue  { background: var(--blue-soft);    color: var(--blue); }
 .badge-gray  { background: var(--surface2);     color: var(--muted); border: 1px solid var(--border); }
 .badge-green { background: var(--green-soft);   color: var(--green); }
+.badge-hot   { background: linear-gradient(135deg, #ff6b35, #ff3b30); color: #fff; font-weight: 800; animation: hotPulse 2s ease-in-out infinite; }
+@keyframes hotPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.8; } }
 
 /* ── 탭 ─────────────────────────────────── */
 .tab-bar-wrap {

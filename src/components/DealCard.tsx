@@ -13,6 +13,7 @@ interface DealCardProps {
         mallName: string;
         category: string;
         aiSummary: string;
+        viewCount?: number;
         createdAt: Date | string;
     };
 }
@@ -58,6 +59,9 @@ export default function DealCard({ product }: DealCardProps) {
                 <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
                     <span className="badge badge-red">{product.category}</span>
                     <span className="badge badge-gray">{product.mallName}</span>
+                    {(product.viewCount ?? 0) >= 5 && (
+                        <span className="badge badge-hot">HOT</span>
+                    )}
                 </div>
 
                 {/* 제목 */}

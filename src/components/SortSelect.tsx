@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 const SORT_OPTIONS = [
     { label: "최신순", value: "newest" },
+    { label: "인기순", value: "popular" },
     { label: "할인율순", value: "discount" },
     { label: "저가순", value: "price_asc" },
     { label: "고가순", value: "price_desc" },
