@@ -355,6 +355,87 @@ async function sendTelegramMonitorAlert(sourceStats: Record<string, number>, tot
     } catch { /* 무시 */ }
 }
 
+// ─── 카테고리 후처리 보정 (AI 오분류 방지) ──────────────────
+const BRAND_CATEGORY_RULES: { pattern: RegExp; category: string }[] = [
+    // Apple 제품
+    { pattern: /\b(apple|아이폰|iphone|맥북|macbook|아이패드|ipad|에어팟|airpods?|애플워치|apple\s?watch|imac|mac\s?mini|mac\s?studio|mac\s?pro|homepod|apple\s?tv)\b/i, category: "Apple" },
+    // 삼성/LG 제품
+    { pattern: /\b(삼성|samsung|갤럭시|galaxy|갤[럭S]|비스포크|bespoke|에어드레서|갤탭|갤럭시\s?탭|갤럭시\s?버즈|갤럭시\s?워치|갤럭시\s?북|갤럭시\s?링)\b/i, category: "삼성/LG" },
+    { pattern: /\b(LG전자|LG\s?gram|LG그램|스탠바이미|올레드|트롬|오브제|시그니처|퓨리케어|코드제로|디오스)\b/i, category: "삼성/LG" },
+];
+
+function correctCategory(title: string, aiCategory: string): string {
+    const combined = title.toLowerCase();
+    for (const rule of BRAND_CATEGORY_RULES) {
+        if (rule.pattern.test(combined)) {
+            if (aiCategory !== rule.category) {
+                console.log(`[Category Fix] "${title}" : ${aiCategory} → ${rule.category}`);
+            }
+            return rule.category;
+        }
+    }
+    return aiCategory;
+}
+
+// ─── 쇼핑몰 페이지 제목 추출 + 딜 제목 일치 검증 ─────────
+function extractKeywords(text: string): string[] {
+    return text
+        .replace(/\[.*?\]/g, "")
+        .replace(/[0-9,]+원/g, "")
+        .replace(/\$[\d,.]+/g, "")
+        .replace(/만원대?|역대|최저가?|특가|할인|초특가|오픈박스|리퍼|정품|새제품|미개봉|사전예약|예약판매|KB페이|카드|혜택|더블스토리지/gi, "")
+        .replace(/[^\w가-힣a-zA-Z]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .split(" ")
+        .filter(w => w.length >= 2);
+}
+
+async function verifyShopLinkMatch(shopUrl: string, dealTitle: string): Promise<{ match: boolean; shopTitle: string | null }> {
+    try {
+        const { data: html } = await axios.get(shopUrl, {
+            headers: { ...HEADERS, Referer: shopUrl },
+            timeout: 8000,
+            maxRedirects: 5,
+        });
+        const $ = cheerio.load(html);
+
+        // 쇼핑몰 페이지에서 상품명 추출 (우선순위)
+        const shopTitle =
+            $('meta[property="og:title"]').attr("content")?.trim() ||
+            $("h1.prod-buy__title").text().trim() ||          // 쿠팡
+            $("h1#productName").text().trim() ||               // 11번가
+            $("h2.itemtit").text().trim() ||                   // G마켓
+            $("h1.product-name").text().trim() ||              // 공통
+            $("title").text().trim() ||
+            null;
+
+        if (!shopTitle) return { match: true, shopTitle: null }; // 제목 추출 실패 → 통과
+
+        const dealKeywords = extractKeywords(dealTitle);
+        const shopKeywords = extractKeywords(shopTitle);
+
+        if (dealKeywords.length === 0 || shopKeywords.length === 0) return { match: true, shopTitle };
+
+        // 핵심 키워드 매칭: 딜 제목의 핵심 단어가 쇼핑몰 제목에 1개 이상 포함되면 OK
+        const matchCount = dealKeywords.filter(kw =>
+            shopKeywords.some(sk => sk.includes(kw) || kw.includes(sk))
+        ).length;
+
+        // 매칭률이 30% 이상이거나 2개 이상 매칭되면 OK
+        const matchRatio = matchCount / dealKeywords.length;
+        const isMatch = matchCount >= 2 || matchRatio >= 0.3;
+
+        if (!isMatch) {
+            console.log(`[Link Mismatch] 딜: "${dealTitle}" ↔ 쇼핑몰: "${shopTitle}" (매칭: ${matchCount}/${dealKeywords.length})`);
+        }
+
+        return { match: isMatch, shopTitle };
+    } catch {
+        return { match: true, shopTitle: null }; // 요청 실패 → 통과 (관대하게)
+    }
+}
+
 // ─── URL-safe slug 생성 ──────────────────────────────────────
 function generateSlug(title: string): string {
     const ascii = title
@@ -718,6 +799,19 @@ async function runScrape() {
 - 스마트홈/IoT: 스마트워치, 블루투스스피커, 스마트조명, 홈캠, 도어락 등
 - 생활가전: 드라이어, 고데기, 전동칫솔, 전기면도기, 커피머신, 청소기 등
 
+[카테고리 분류 규칙 - 반드시 준수]
+★ 브랜드/제품명으로 카테고리를 정확히 분류할 것:
+- "Apple" 카테고리: Apple, 아이폰, iPhone, 맥북, MacBook, 아이패드, iPad, 에어팟, AirPods, 애플워치, Apple Watch, iMac, Mac Mini, Mac Studio, Mac Pro, HomePod, Apple TV 제품만 해당
+- "삼성/LG" 카테고리: 삼성, Samsung, 갤럭시, Galaxy, 비스포크, BESPOKE, 에어드레서, LG, 그램, gram, 스탠바이미, 올레드, OLED(LG), 트롬, 오브제, 시그니처, 퓨리케어, 코드제로, 디오스 등
+- "노트북/PC" 카테고리: 레노버, ASUS, MSI, HP, 델, Acer, 한성, 기가바이트, 데스크톱, 조립PC 등 (삼성 갤럭시북/LG그램은 "삼성/LG"로)
+- "모니터/주변기기" 카테고리: 모니터, 키보드, 마우스, 웹캠, SSD, HDD, RAM, 그래픽카드, USB허브, 도킹스테이션 등
+- "음향/스마트기기" 카테고리: 무선이어폰, 헤드폰, 블루투스스피커, 스마트워치(삼성/애플 제외), 스마트밴드, VR 등
+- "생활가전" 카테고리: 드라이어, 고데기, 전동칫솔, 전기면도기, 커피머신, 안마기, 제습기 등
+- "해외직구" 카테고리: 해외뽐뿌 출처 또는 Amazon/AliExpress/eBay 등 해외몰 상품
+- "골드박스" 카테고리: 쿠팡 골드박스/타임딜 명시된 경우만
+
+★ 주의: 갤럭시 S/Z/A/탭/버즈/워치/북은 반드시 "삼성/LG"이다. 절대 "Apple"로 분류하지 마라.
+
 [등록 조건 - 반드시 둘 다 충족]
 1. 위 제품군에 해당하는 전자/가전/스마트 기기
 2. 실질적 가격 혜택: 정가 대비 할인, 기간한정 특가, 역대최저가, 쿠폰/카드 할인가 등
@@ -750,6 +844,14 @@ async function runScrape() {
 
         if (!aiData.isIT) continue;
 
+        // ── 카테고리 후처리 보정 (AI 오분류 방지) ──
+        if (aiData.category) {
+            aiData.category = correctCategory(
+                `${deal.title} ${aiData.refinedTitle || ""}`,
+                aiData.category
+            );
+        }
+
         const _origCheck = Number(aiData.originalPrice) || 0;
         const _saleCheck = Number(aiData.salePrice) || 0;
         const _hasDiscount = _origCheck > 0 || _saleCheck > 0 || !!aiData.discountInfo;
@@ -770,6 +872,16 @@ async function runScrape() {
         }
 
         affiliateLink = toCoupangAffiliateLink(affiliateLink);
+
+        // ── 링크-제목 일치 검증 (다른 상품 링크 방지) ──
+        if (isShopLink(affiliateLink)) {
+            const titleToCheck = aiData.refinedTitle || deal.title;
+            const { match } = await verifyShopLinkMatch(affiliateLink, titleToCheck);
+            if (!match) {
+                console.log(`[Skip] 링크 불일치로 스킵: "${titleToCheck}" → ${affiliateLink}`);
+                continue;
+            }
+        }
 
         // 이미지 유효성 검증 (깨진 URL 방지)
         if (imageUrl && !(await validateImageUrl(imageUrl))) {
