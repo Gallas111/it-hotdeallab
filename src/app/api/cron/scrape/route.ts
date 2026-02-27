@@ -874,8 +874,12 @@ async function runScrape() {
 
         if (!isShopLink(deal.link)) {
             const shopLink = await fetchShopLink(deal.link, referer);
-            affiliateLink = shopLink || deal.link;
-            if (shopLink && !imageUrl) {
+            if (!shopLink) {
+                console.log(`[Skip] 쇼핑몰 링크 추출 실패, 저장 안함: "${deal.title}"`);
+                continue;
+            }
+            affiliateLink = shopLink;
+            if (!imageUrl) {
                 imageUrl = await fetchShopImage(shopLink);
             }
         } else if (!imageUrl) {
