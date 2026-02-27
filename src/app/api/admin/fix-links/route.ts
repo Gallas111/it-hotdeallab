@@ -34,11 +34,9 @@ function extractKeywords(text: string): string[] {
         .filter(w => w.length >= 2);
 }
 
-async function checkLinkMatch(shopUrl: string, dealTitle: string): Promise<{ match: boolean; shopTitle: string | null; error?: string }> {
-    // 커뮤니티 링크(쇼핑몰 아닌 링크)는 스킵
-    const isShop = SHOP_DOMAINS.some(d => shopUrl.includes(d));
-    if (!isShop) return { match: false, shopTitle: null, error: "쇼핑몰 링크 아님" };
+type CheckResult = { match: boolean; shopTitle: string | null; error?: string };
 
+async function checkShopLink(shopUrl: string, dealTitle: string): Promise<CheckResult> {
     try {
         const { data: html, status } = await axios.get(shopUrl, {
             headers: { ...HEADERS, Referer: shopUrl },
@@ -50,21 +48,28 @@ async function checkLinkMatch(shopUrl: string, dealTitle: string): Promise<{ mat
         if (status === 404) return { match: false, shopTitle: null, error: "404 Not Found" };
 
         const $ = cheerio.load(html);
+        const lower = (html as string).toLowerCase();
+
+        // 에러 페이지 체크
+        const pageTitle = $("title").text().trim();
+        if (/에러|error|not found|페이지를 찾을 수 없/i.test(pageTitle)) {
+            return { match: false, shopTitle: pageTitle, error: "에러 페이지" };
+        }
 
         // 품절/삭제 체크
-        const lower = (html as string).toLowerCase();
         const SOLD_OUT = ["품절", "판매종료", "판매완료", "구매불가", "soldout", "sold out", "out of stock", "상품이 존재하지 않", "삭제된 상품"];
         if (SOLD_OUT.some(kw => lower.includes(kw.toLowerCase()))) {
             return { match: false, shopTitle: null, error: "품절/삭제" };
         }
 
+        // 제목 매칭 검증
         const shopTitle =
             $('meta[property="og:title"]').attr("content")?.trim() ||
             $("h1.prod-buy__title").text().trim() ||
             $("h1#productName").text().trim() ||
             $("h2.itemtit").text().trim() ||
             $("h1.product-name").text().trim() ||
-            $("title").text().trim() ||
+            pageTitle ||
             null;
 
         if (!shopTitle) return { match: true, shopTitle: null };
@@ -77,7 +82,6 @@ async function checkLinkMatch(shopUrl: string, dealTitle: string): Promise<{ mat
         const matchCount = dealKeywords.filter(kw =>
             shopKeywords.some(sk => sk.includes(kw) || kw.includes(sk))
         ).length;
-
         const matchRatio = matchCount / dealKeywords.length;
         const isMatch = matchCount >= 2 || matchRatio >= 0.3;
 
@@ -88,20 +92,24 @@ async function checkLinkMatch(shopUrl: string, dealTitle: string): Promise<{ mat
 }
 
 export async function POST() {
+    // 쇼핑몰 링크가 있는 딜만 검사 (커뮤니티 링크는 건드리지 않음)
     const products = await prisma.product.findMany({
         where: { isActive: true },
         select: { id: true, title: true, affiliateLink: true },
         orderBy: { createdAt: "desc" },
-        take: 30, // 최근 30개만 검사 (API 타임아웃 방지)
     });
+
+    const shopProducts = products.filter(p =>
+        SHOP_DOMAINS.some(d => p.affiliateLink.includes(d))
+    );
 
     const mismatched: { id: string; title: string; link: string; shopTitle: string | null; error?: string }[] = [];
 
     // 5개씩 배치 처리
-    for (let i = 0; i < products.length; i += 5) {
-        const batch = products.slice(i, i + 5);
+    for (let i = 0; i < shopProducts.length; i += 5) {
+        const batch = shopProducts.slice(i, i + 5);
         const results = await Promise.allSettled(
-            batch.map(p => checkLinkMatch(p.affiliateLink, p.title))
+            batch.map(p => checkShopLink(p.affiliateLink, p.title))
         );
 
         for (let j = 0; j < batch.length; j++) {
@@ -126,7 +134,9 @@ export async function POST() {
     }
 
     return NextResponse.json({
-        checked: products.length,
+        total: products.length,
+        shopLinksChecked: shopProducts.length,
+        communityLinksSkipped: products.length - shopProducts.length,
         removed: mismatched.length,
         details: mismatched.map(m => ({
             title: m.title,
