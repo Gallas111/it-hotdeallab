@@ -23,10 +23,11 @@ const SHOP_DOMAINS = [
     "ssg.com", "lotteon.com", "danawa.com",
     "tmon.co.kr", "smartstore.naver.com", "brand.naver.com",
     "shopping.naver.com", "search.shopping.naver.com",
+    "shoppinglive.naver.com", "naver.me",
     // 국내 전문몰
     "cjonstyle.com", "compuzone.co.kr", "ohou.se",
     "lottehimall.com", "himart.co.kr", "earphoneshop.co.kr",
-    "baemin.com", "wemakeprice.com", "kurly.com",
+    "baemin.com", "baemin.go.link", "wemakeprice.com", "kurly.com",
     "apple.com", "samsung.com", "lg.co.kr",
     // 해외직구
     "amazon.com", "amazon.co.jp", "amazon.co.uk", "amazon.de",
