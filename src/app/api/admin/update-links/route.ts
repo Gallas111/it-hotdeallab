@@ -26,10 +26,24 @@ const COMMUNITY_DOMAINS = ["clien.net", "ppomppu.co.kr", "ruliweb.com", "bbs.rul
 const isShopLink = (url: string) => SHOP_DOMAINS.some(d => url.includes(d));
 const isCommunityLink = (url: string) => COMMUNITY_DOMAINS.some(d => url.includes(d));
 
+function toCoupangAffiliateLink(url: string): string {
+    const COUPANG_PARTNERS_ID = process.env.COUPANG_PARTNERS_ID || "";
+    if (!COUPANG_PARTNERS_ID) return url;
+    if (!url.includes("coupang.com")) return url;
+    if (url.includes("link.coupang.com")) return url;
+    try {
+        const u = new URL(url);
+        u.searchParams.set("partnerCode", COUPANG_PARTNERS_ID);
+        return u.toString();
+    } catch { return url; }
+}
+
 async function extractShopLink(postUrl: string): Promise<string | null> {
     try {
-        const referer = `https://${new URL(postUrl).hostname}/`;
-        const { data: html } = await axios.get(postUrl, {
+        // http→https 변환 (뽐뿌 JS 리다이렉트 방지)
+        const fetchUrl = postUrl.replace(/^http:\/\/(www\.)?ppomppu\.co\.kr/, "https://www.ppomppu.co.kr");
+        const referer = `https://${new URL(fetchUrl).hostname}/`;
+        const { data: html } = await axios.get(fetchUrl, {
             headers: { ...HEADERS, Referer: referer },
             timeout: 10000,
         });
@@ -111,9 +125,10 @@ export async function POST() {
         for (const product of products) {
             const shopLink = await extractShopLink(product.affiliateLink);
             if (shopLink) {
+                const finalLink = toCoupangAffiliateLink(shopLink);
                 await prisma.product.update({
                     where: { id: product.id },
-                    data: { affiliateLink: shopLink },
+                    data: { affiliateLink: finalLink },
                 });
                 updated++;
             }

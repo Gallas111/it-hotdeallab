@@ -46,6 +46,21 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     };
 }
 
+function getCtaLabel(affiliateLink: string, mallName: string): string {
+    const communityMap: Record<string, string> = {
+        "ppomppu.co.kr": "뽐뿌",
+        "clien.net": "클리앙",
+        "ruliweb.com": "루리웹",
+        "quasarzone.com": "퀘이사존",
+    };
+    for (const [domain, name] of Object.entries(communityMap)) {
+        if (affiliateLink.includes(domain)) {
+            return `${name}에서 확인하기`;
+        }
+    }
+    return `${mallName}에서 구매하기`;
+}
+
 export default async function DealDetail({ params }: { params: Promise<{ slug: string }> }) {
     const { slug: id } = await params;
     const p = await getProductById(id);
@@ -208,7 +223,7 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
 
                 {/* CTA 버튼 */}
                 <ClickTracker id={p.id} href={p.affiliateLink} target="_blank" rel="noopener noreferrer" className="btn-primary">
-                    {p.mallName}에서 구매하기
+                    {getCtaLabel(p.affiliateLink, p.mallName)}
                 </ClickTracker>
 
                 {/* 쿠팡 파트너스 공지 문구 (쿠팡 딜만 표시) */}

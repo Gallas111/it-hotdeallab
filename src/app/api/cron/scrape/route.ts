@@ -64,7 +64,9 @@ type RawDeal = { title: string; link: string; mallName: string; source: string; 
 // ─── 커뮤니티 포스트에서 쇼핑몰 링크 추출 ─────────────────────
 async function fetchShopLink(postUrl: string, referer: string): Promise<string | null> {
     try {
-        const { data: html } = await axios.get(postUrl, {
+        // http→https 변환 (뽐뿌 등 JS 리다이렉트 방지)
+        const fetchUrl = postUrl.replace(/^http:\/\/(www\.)?ppomppu\.co\.kr/, "https://www.ppomppu.co.kr");
+        const { data: html } = await axios.get(fetchUrl, {
             headers: { ...HEADERS, Referer: referer },
             timeout: 10000,
         });
