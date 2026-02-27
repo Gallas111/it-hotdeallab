@@ -144,6 +144,12 @@ async function fetchShopLink(postUrl: string, referer: string): Promise<string |
     }
 }
 
+// 커뮤니티 CDN 이미지 차단 (핫링크 차단 + 제품 이미지 아님)
+const BLOCKED_IMG_DOMAINS = ["ppomppu.co.kr", "clien.net", "ruliweb.com", "quasarzone.com"];
+function isCommunityImage(url: string): boolean {
+    return BLOCKED_IMG_DOMAINS.some(d => url.includes(d));
+}
+
 // ─── 쇼핑몰 상품 페이지 이미지 추출 ──────────────────────────
 // 우선순위: 상품 메인 이미지 선택자 → og:image 순으로 시도
 async function fetchShopImage(shopUrl: string): Promise<string | null> {
@@ -186,18 +192,19 @@ async function fetchShopImage(shopUrl: string): Promise<string | null> {
             const src = $(selector).first().attr("src")
                 || $(selector).first().attr("data-src");
             const img = normalizeImgUrl(src, shopUrl);
-            if (img && img.startsWith("http")) return img;
+            if (img && img.startsWith("http") && !isCommunityImage(img)) return img;
         }
 
         // 2. product 메타 이미지
         const productMeta = $('meta[property="product:image"]').attr("content");
         const productNorm = normalizeImgUrl(productMeta, shopUrl);
-        if (productNorm) return productNorm;
+        if (productNorm && !isCommunityImage(productNorm)) return productNorm;
 
         // 3. og:image (마지막 폴백 - 기획전/배너 이미지 가능성 있음)
         const ogRaw = $('meta[property="og:image"]').attr("content")
             || $('meta[name="og:image"]').attr("content");
-        return normalizeImgUrl(ogRaw, shopUrl);
+        const ogNorm = normalizeImgUrl(ogRaw, shopUrl);
+        return ogNorm && !isCommunityImage(ogNorm) ? ogNorm : null;
 
     } catch {
         return null;
@@ -231,11 +238,29 @@ function extractImageKeyword(title: string): string {
         .replace(/¥[\d,.]+/g, "")
         .replace(/만원대?/g, "")
         .replace(/역대[가최]*/g, "")
-        .replace(/최저가|특가|할인|초특가|오픈박스|리퍼|정품|새제품|미개봉/g, "")
-        .replace(/[^\w\s가-힣a-zA-Z]/g, " ")
+        .replace(/최저가|특가|할인|초특가|오픈박스|리퍼|정품|새제품|미개봉|무료배송|득템|기회/g, "")
+        .replace(/[^\w\s가-힣a-zA-Z0-9.-]/g, " ")
         .replace(/\s+/g, " ")
         .trim()
-        .substring(0, 40);
+        .substring(0, 50);
+}
+
+// 제품명 핵심 키워드 추출 (유사도 비교용)
+function extractCoreTokens(text: string): string[] {
+    const clean = text.replace(/<[^>]+>/g, "").replace(/\[.*?\]/g, "")
+        .replace(/[0-9,]+원/g, "").replace(/\$[\d,.]+/g, "")
+        .replace(/특가|할인|초특가|무료배송|최저가/g, "")
+        .toLowerCase().trim();
+    return clean.split(/[\s/,]+/).filter(t => t.length >= 2);
+}
+
+// 두 제품명의 핵심 키워드 겹침 비율 계산
+function titleSimilarity(titleA: string, titleB: string): number {
+    const tokensA = extractCoreTokens(titleA);
+    const tokensB = extractCoreTokens(titleB);
+    if (tokensA.length === 0) return 0;
+    const matched = tokensA.filter(t => tokensB.some(b => b.includes(t) || t.includes(b)));
+    return matched.length / tokensA.length;
 }
 
 async function fetchNaverFallbackImage(title: string): Promise<string | null> {
@@ -254,13 +279,25 @@ async function fetchNaverFallbackImage(title: string): Promise<string | null> {
     // 1차: 네이버 쇼핑 검색 (CDN 이미지, 핫링크 없음)
     try {
         const { data } = await axios.get("https://openapi.naver.com/v1/search/shop.json", {
-            params: { query: keyword, display: 3 },
+            params: { query: keyword, display: 5 },
             headers: naverHeaders,
             timeout: 5000,
         });
-        const img = data.items?.[0]?.image;
-        const url = normalizeImgUrl(img, "https://shopping.naver.com");
-        if (url) return url;
+        // 제품명 유사도가 가장 높은 결과의 이미지 사용
+        let bestImg: string | null = null;
+        let bestScore = 0;
+        for (const item of data.items || []) {
+            const score = titleSimilarity(title, item.title);
+            if (score > bestScore && item.image) {
+                bestScore = score;
+                bestImg = item.image;
+            }
+        }
+        if (bestScore >= 0.3 && bestImg) {
+            const url = normalizeImgUrl(bestImg, "https://shopping.naver.com");
+            if (url) return url;
+        }
+        console.log(`[Image] 네이버쇼핑 유사도 부족 (best=${bestScore.toFixed(2)}): "${keyword}"`);
     } catch { /* 다음 단계로 */ }
 
     // 2차: 네이버 이미지 검색 (쇼핑에 없는 제품도 커버)
@@ -282,6 +319,7 @@ async function fetchNaverFallbackImage(title: string): Promise<string | null> {
 // ─── 이미지 URL 유효성 검증 ──────────────────────────────────
 async function validateImageUrl(url: string | null): Promise<boolean> {
     if (!url) return false;
+    if (isCommunityImage(url)) return false;
     try {
         const res = await axios.head(url, {
             timeout: 5000,
@@ -871,6 +909,8 @@ async function runScrape() {
         const referer = `https://${new URL(deal.link).hostname}/`;
         let affiliateLink = deal.link;
         let imageUrl: string | null = deal.imageUrl || null;
+        // 커뮤니티 CDN 이미지 즉시 제거 (핫링크 차단 + 제품 이미지 아님)
+        if (imageUrl && isCommunityImage(imageUrl)) imageUrl = null;
 
         if (!isShopLink(deal.link)) {
             const shopLink = await fetchShopLink(deal.link, referer);
