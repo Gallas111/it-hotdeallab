@@ -356,12 +356,13 @@ async function sendTelegramMonitorAlert(sourceStats: Record<string, number>, tot
 }
 
 // ─── 카테고리 후처리 보정 (AI 오분류 방지) ──────────────────
+// \b는 한글에서 작동하지 않으므로 사용하지 않음
 const BRAND_CATEGORY_RULES: { pattern: RegExp; category: string }[] = [
+    // 삼성/LG 제품 (Apple보다 먼저 체크 - 갤럭시가 Apple로 오분류되는 것 방지)
+    { pattern: /(삼성|samsung|갤럭시|galaxy|갤S|갤[A-Z]?\d|비스포크|bespoke|에어드레서|갤탭|갤럭시\s?탭|갤럭시\s?버즈|갤럭시\s?워치|갤럭시\s?북|갤럭시\s?링)/i, category: "삼성/LG" },
+    { pattern: /(LG전자|LG\s?gram|LG그램|스탠바이미|올레드|트롬|오브제|시그니처|퓨리케어|코드제로|디오스)/i, category: "삼성/LG" },
     // Apple 제품
-    { pattern: /\b(apple|아이폰|iphone|맥북|macbook|아이패드|ipad|에어팟|airpods?|애플워치|apple\s?watch|imac|mac\s?mini|mac\s?studio|mac\s?pro|homepod|apple\s?tv)\b/i, category: "Apple" },
-    // 삼성/LG 제품
-    { pattern: /\b(삼성|samsung|갤럭시|galaxy|갤[럭S]|비스포크|bespoke|에어드레서|갤탭|갤럭시\s?탭|갤럭시\s?버즈|갤럭시\s?워치|갤럭시\s?북|갤럭시\s?링)\b/i, category: "삼성/LG" },
-    { pattern: /\b(LG전자|LG\s?gram|LG그램|스탠바이미|올레드|트롬|오브제|시그니처|퓨리케어|코드제로|디오스)\b/i, category: "삼성/LG" },
+    { pattern: /(apple|아이폰|iphone|맥북|macbook|아이패드|ipad|에어팟|airpods?|애플워치|apple\s?watch|imac|mac\s?mini|mac\s?studio|mac\s?pro|homepod|apple\s?tv)/i, category: "Apple" },
 ];
 
 function correctCategory(title: string, aiCategory: string): string {
