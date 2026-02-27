@@ -14,12 +14,23 @@ const HEADERS = {
 };
 
 const SHOP_DOMAINS = [
+    // 국내 대형
     "coupang.com", "link.coupang.com", "11st.co.kr",
     "gmarket.co.kr", "auction.co.kr", "interpark.com",
     "ssg.com", "lotteon.com", "danawa.com",
-    "amazon.com", "amazon.co.jp", "aliexpress.com",
-    "tmon.co.kr", "wemakeprice.com",
-    "smartstore.naver.com", "brand.naver.com",
+    "tmon.co.kr", "smartstore.naver.com", "brand.naver.com",
+    "shopping.naver.com", "search.shopping.naver.com",
+    // 국내 전문몰
+    "cjonstyle.com", "compuzone.co.kr", "ohou.se",
+    "lottehimall.com", "himart.co.kr", "earphoneshop.co.kr",
+    "baemin.com", "wemakeprice.com", "kurly.com",
+    "apple.com", "samsung.com", "lg.co.kr",
+    // 해외직구
+    "amazon.com", "amazon.co.jp", "amazon.co.uk", "amazon.de",
+    "aliexpress.com", "aliexpress.kr",
+    "ebay.com", "ebay.co.kr", "newegg.com", "bhphotovideo.com",
+    "iherb.com", "rakuten.co.jp",
+    "woot.com", "costco.com", "asus.com",
 ];
 
 const COMMUNITY_DOMAINS = ["clien.net", "ppomppu.co.kr", "ruliweb.com", "bbs.ruliweb"];
