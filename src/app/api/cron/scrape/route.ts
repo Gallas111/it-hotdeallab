@@ -54,6 +54,21 @@ function toCoupangAffiliateLink(url: string): string {
     }
 }
 
+// 알리익스프레스 URL을 포털스 제휴 링크로 변환
+function toAliexpressAffiliateLink(url: string): string {
+    const trackingId = process.env.ALIEXPRESS_TRACKING_ID || "";
+    if (!trackingId) return url;
+    if (!url.includes("aliexpress.com")) return url;
+    try {
+        const u = new URL(url);
+        u.searchParams.set("aff_platform", "portals-tool");
+        u.searchParams.set("sk", trackingId);
+        return u.toString();
+    } catch {
+        return url;
+    }
+}
+
 // URL 정규화 (//, /, http 모두 처리)
 function normalizeImgUrl(url: string | undefined, baseUrl: string): string | null {
     if (!url) return null;
@@ -440,7 +455,7 @@ async function repairCommunityLinks() {
         if (shopLink) {
             await prisma.product.update({
                 where: { id: p.id },
-                data: { affiliateLink: toCoupangAffiliateLink(shopLink) },
+                data: { affiliateLink: toAliexpressAffiliateLink(toCoupangAffiliateLink(shopLink)) },
             });
             repaired++;
             console.log(`[Link Repair] ✓ ${p.title}`);
@@ -1018,6 +1033,7 @@ async function runScrape() {
         }
 
         affiliateLink = toCoupangAffiliateLink(affiliateLink);
+        affiliateLink = toAliexpressAffiliateLink(affiliateLink);
 
         // ── 링크-제목 일치 검증 (다른 상품 링크 방지) ──
         if (isShopLink(affiliateLink)) {

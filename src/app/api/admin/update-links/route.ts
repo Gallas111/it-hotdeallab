@@ -50,6 +50,22 @@ function toCoupangAffiliateLink(url: string): string {
     } catch { return url; }
 }
 
+function toAliexpressAffiliateLink(url: string): string {
+    const trackingId = process.env.ALIEXPRESS_TRACKING_ID || "";
+    if (!trackingId) return url;
+    if (!url.includes("aliexpress.com")) return url;
+    try {
+        const u = new URL(url);
+        u.searchParams.set("aff_platform", "portals-tool");
+        u.searchParams.set("sk", trackingId);
+        return u.toString();
+    } catch { return url; }
+}
+
+function toAffiliateLink(url: string): string {
+    return toAliexpressAffiliateLink(toCoupangAffiliateLink(url));
+}
+
 async function extractShopLink(postUrl: string): Promise<string | null> {
     try {
         // http→https 변환 (뽐뿌 JS 리다이렉트 방지)
@@ -157,7 +173,7 @@ export async function POST() {
         for (const product of products) {
             const shopLink = await extractShopLink(product.affiliateLink);
             if (shopLink) {
-                const finalLink = toCoupangAffiliateLink(shopLink);
+                const finalLink = toAffiliateLink(shopLink);
                 await prisma.product.update({
                     where: { id: product.id },
                     data: { affiliateLink: finalLink },
@@ -167,11 +183,29 @@ export async function POST() {
             await new Promise(r => setTimeout(r, 200));
         }
 
+        // 알리익스프레스 딜 중 제휴 파라미터 없는 것 일괄 업데이트
+        const aliDeals = await prisma.product.findMany({
+            where: {
+                affiliateLink: { contains: "aliexpress.com" },
+                NOT: { affiliateLink: { contains: "aff_platform" } },
+            },
+            select: { id: true, affiliateLink: true },
+        });
+        let aliUpdated = 0;
+        for (const p of aliDeals) {
+            const newLink = toAliexpressAffiliateLink(p.affiliateLink);
+            if (newLink !== p.affiliateLink) {
+                await prisma.product.update({ where: { id: p.id }, data: { affiliateLink: newLink } });
+                aliUpdated++;
+            }
+        }
+
         return NextResponse.json({
             success: true,
             total: products.length,
             updated,
-            message: `${products.length}개 커뮤니티 링크 처리 → ${updated}개 쇼핑몰 링크로 업데이트`,
+            aliUpdated,
+            message: `커뮤니티 링크 ${updated}개 → 쇼핑몰 링크로 교체 / 알리 제휴 링크 ${aliUpdated}개 업데이트`,
         });
     } catch (error: any) {
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });
