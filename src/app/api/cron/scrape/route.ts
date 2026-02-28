@@ -54,6 +54,30 @@ function toCoupangAffiliateLink(url: string): string {
     }
 }
 
+// affiliateLink 기반으로 실제 쇼핑몰 이름 결정
+function getMallNameFromLink(link: string, fallback: string): string {
+    if (link.includes("coupang.com")) return "쿠팡";
+    if (link.includes("smartstore.naver.com")) return "네이버스마트스토어";
+    if (link.includes("brand.naver.com")) return "네이버브랜드스토어";
+    if (link.includes("shopping.naver.com") || link.includes("naver.me")) return "네이버쇼핑";
+    if (link.includes("11st.co.kr")) return "11번가";
+    if (link.includes("gmarket.co.kr")) return "G마켓";
+    if (link.includes("auction.co.kr")) return "옥션";
+    if (link.includes("ssg.com")) return "SSG";
+    if (link.includes("lotteon.com")) return "롯데온";
+    if (link.includes("danawa.com")) return "다나와";
+    if (link.includes("interpark.com")) return "인터파크";
+    if (link.includes("aliexpress.com")) return "알리익스프레스";
+    if (link.includes("amazon.com")) return "아마존";
+    if (link.includes("ebay.com")) return "eBay";
+    if (link.includes("apple.com")) return "Apple";
+    if (link.includes("samsung.com")) return "삼성";
+    if (link.includes("lg.co.kr")) return "LG";
+    if (link.includes("himart.co.kr")) return "하이마트";
+    if (link.includes("compuzone.co.kr")) return "컴퓨존";
+    return fallback;
+}
+
 // 알리익스프레스 URL을 포털스 제휴 링크로 변환
 function toAliexpressAffiliateLink(url: string): string {
     const trackingId = process.env.ALIEXPRESS_TRACKING_ID || "";
@@ -432,7 +456,7 @@ async function repairCommunityLinks() {
             isActive: true,
             OR: COMMUNITY_LINK_DOMAINS.map(d => ({ affiliateLink: { contains: d } })),
         },
-        select: { id: true, title: true, affiliateLink: true, sourceUrl: true },
+        select: { id: true, title: true, affiliateLink: true, sourceUrl: true, mallName: true },
         orderBy: { createdAt: "desc" },
         take: 5, // 매 실행마다 최대 5개씩 처리
     });
@@ -453,9 +477,13 @@ async function repairCommunityLinks() {
         const shopLink = await fetchShopLink(postUrl, referer);
 
         if (shopLink) {
+            const finalLink = toAliexpressAffiliateLink(toCoupangAffiliateLink(shopLink));
             await prisma.product.update({
                 where: { id: p.id },
-                data: { affiliateLink: toAliexpressAffiliateLink(toCoupangAffiliateLink(shopLink)) },
+                data: {
+                    affiliateLink: finalLink,
+                    mallName: getMallNameFromLink(finalLink, p.mallName || "쇼핑몰"),
+                },
             });
             repaired++;
             console.log(`[Link Repair] ✓ ${p.title}`);
@@ -1086,7 +1114,7 @@ async function runScrape() {
                 salePrice,
                 discountPercent,
                 category: aiData.category || "기타",
-                mallName: deal.mallName,
+                mallName: getMallNameFromLink(affiliateLink, deal.mallName),
                 sourceUrl: deal.link,
                 aiSummary: aiData.discountInfo
                     ? `[${aiData.discountInfo}] ${aiData.aiSummary || ""}`.trim()
