@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
-import { useState } from "react";
+import DealImage from "./DealImage";
 
 interface DealCardProps {
     product: {
@@ -35,7 +34,6 @@ function timeAgo(date: Date | string): string {
 export default function DealCard({ product }: DealCardProps) {
     const hasDiscount = product.discountPercent > 0;
     const hasPrice = product.salePrice > 0;
-    const [imgError, setImgError] = useState(false);
 
     return (
         <Link href={`/deal/${product.id}`} className="deal-item" style={{ textDecoration: "none" }}>
@@ -48,14 +46,14 @@ export default function DealCard({ product }: DealCardProps) {
                 overflow: "hidden",
                 display: "flex", alignItems: "center", justifyContent: "center",
             }}>
-                {product.imageUrl && !imgError ? (
+                {product.imageUrl ? (
                     <div style={{ position: "relative", width: "100%", height: "100%" }}>
-                        <Image
-                            src={product.imageUrl}
+                        <DealImage
+                            productId={product.id}
+                            imageUrl={product.imageUrl}
                             alt={product.title}
                             fill
                             style={{ objectFit: "cover" }}
-                            onError={() => setImgError(true)}
                         />
                     </div>
                 ) : (

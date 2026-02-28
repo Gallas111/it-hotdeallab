@@ -1,12 +1,12 @@
 import { Metadata } from "next";
 import Link from "next/link";
-import Image from "next/image";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getSimilarDeals } from "@/lib/deals";
 import ShareButtons from "@/components/ShareButtons";
 import ViewTracker from "@/components/ViewTracker";
 import ClickTracker from "@/components/ClickTracker";
+import DealImage from "@/components/DealImage";
 
 export const dynamic = "force-dynamic";
 
@@ -217,7 +217,13 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
                         background: "var(--surface2)", marginBottom: 20,
                         border: "1px solid var(--border)",
                     }}>
-                        <Image src={p.imageUrl} alt={p.title} fill style={{ objectFit: "cover" }} />
+                        <DealImage
+                            productId={p.id}
+                            imageUrl={p.imageUrl}
+                            alt={p.title}
+                            fill
+                            style={{ objectFit: "cover" }}
+                        />
                     </div>
                 )}
 
@@ -353,13 +359,15 @@ export default async function DealDetail({ params }: { params: Promise<{ slug: s
                                 transition: "border-color 0.15s",
                             }}>
                                 {deal.imageUrl ? (
-                                    <Image
-                                        src={deal.imageUrl}
-                                        alt={deal.title}
-                                        width={48}
-                                        height={48}
-                                        style={{ borderRadius: 8, objectFit: "cover", flexShrink: 0 }}
-                                    />
+                                    <div style={{ position: "relative", width: 48, height: 48, flexShrink: 0 }}>
+                                        <DealImage
+                                            productId={deal.id}
+                                            imageUrl={deal.imageUrl}
+                                            alt={deal.title}
+                                            fill
+                                            style={{ borderRadius: 8, objectFit: "cover" }}
+                                        />
+                                    </div>
                                 ) : (
                                     <div style={{
                                         width: 48, height: 48, borderRadius: 8,
