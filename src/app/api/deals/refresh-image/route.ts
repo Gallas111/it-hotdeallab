@@ -89,7 +89,7 @@ async function fetchNaverShoppingImage(title: string): Promise<string | null> {
         }
         // 유사도 낮아도 첫 번째 결과 이미지 사용 (아예 없는 것보다 나음)
         if (!bestImg && data.items?.[0]?.image) bestImg = data.items[0].image;
-        return normalizeImgUrl(bestImg, "https://shopping.naver.com");
+        return normalizeImgUrl(bestImg ?? undefined, "https://shopping.naver.com");
     } catch {
         return null;
     }
