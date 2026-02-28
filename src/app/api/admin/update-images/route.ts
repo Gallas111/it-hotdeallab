@@ -22,8 +22,8 @@ const SHOP_DOMAINS = [
     "lotteimall.com",
 ];
 
-// 핫링크 차단으로 액박 뜨는 커뮤니티 도메인들
-const BROKEN_IMAGE_DOMAINS = ["clien.net", "ppomppu.co.kr"];
+// 핫링크 차단으로 액박 뜨는 커뮤니티 도메인들 (scrape/route.ts와 동기화)
+const BROKEN_IMAGE_DOMAINS = ["clien.net", "ppomppu.co.kr", "ruliweb.com", "quasarzone.com"];
 
 const isShopLink = (url: string) => SHOP_DOMAINS.some(d => url.includes(d));
 const isBrokenImageDomain = (url: string) => BROKEN_IMAGE_DOMAINS.some(d => url.includes(d));

@@ -303,12 +303,13 @@ async function fetchNaverFallbackImage(title: string): Promise<string | null> {
     // 2차: 네이버 이미지 검색 (쇼핑에 없는 제품도 커버)
     try {
         const { data } = await axios.get("https://openapi.naver.com/v1/search/image", {
-            params: { query: keyword + " 제품", display: 3, sort: "sim" },
+            params: { query: keyword + " 제품", display: 5, sort: "sim" },
             headers: naverHeaders,
             timeout: 5000,
         });
         for (const item of data.items || []) {
-            const url = normalizeImgUrl(item.link, "https://search.naver.com");
+            // thumbnail: 실제 이미지 URL, link: 이미지가 있는 페이지 URL
+            const url = normalizeImgUrl(item.thumbnail || item.link, "https://search.naver.com");
             if (url && !url.includes("blog") && !url.includes("cafe")) return url;
         }
     } catch { /* 무시 */ }
@@ -321,16 +322,32 @@ async function validateImageUrl(url: string | null): Promise<boolean> {
     if (!url) return false;
     if (isCommunityImage(url)) return false;
     try {
+        // 1차: HEAD 요청 (빠름)
         const res = await axios.head(url, {
             timeout: 5000,
             headers: { "User-Agent": HEADERS["User-Agent"] },
             maxRedirects: 3,
         });
         const contentType = res.headers["content-type"] || "";
-        return res.status === 200 && contentType.startsWith("image/");
+        if (res.status === 200 && contentType.startsWith("image/")) return true;
+        // HEAD는 성공했지만 content-type 없는 경우 → 유효로 간주
+        if (res.status === 200 && !contentType) return true;
     } catch {
-        return false;
+        // HEAD 차단 서버 → GET으로 재시도 (첫 1바이트만)
+        try {
+            const res = await axios.get(url, {
+                timeout: 5000,
+                headers: { "User-Agent": HEADERS["User-Agent"], Range: "bytes=0-0" },
+                maxRedirects: 3,
+                responseType: "arraybuffer",
+            });
+            const contentType = res.headers["content-type"] || "";
+            return (res.status === 200 || res.status === 206) && (contentType.startsWith("image/") || !contentType);
+        } catch {
+            return false;
+        }
     }
+    return false;
 }
 
 // ─── 이미지 없는 기존 제품 자동 복구 ────────────────────────
@@ -343,7 +360,7 @@ async function repairMissingImages() {
                 { imageUrl: "" },
             ],
         },
-        select: { id: true, title: true, imageUrl: true },
+        select: { id: true, title: true, imageUrl: true, affiliateLink: true },
         orderBy: { createdAt: "desc" },
         take: 5, // 매 실행마다 최대 5개씩 복구 (API 호출 절약)
     });
@@ -353,11 +370,20 @@ async function repairMissingImages() {
 
     let repaired = 0;
     for (const p of products) {
-        let newImageUrl = await fetchNaverFallbackImage(p.title);
+        let newImageUrl: string | null = null;
 
-        // 검증: 실제 이미지인지 확인
-        if (newImageUrl && !(await validateImageUrl(newImageUrl))) {
-            newImageUrl = null;
+        // 1차: affiliateLink(쇼핑몰 페이지)에서 og:image 추출
+        if (p.affiliateLink) {
+            newImageUrl = await fetchShopImage(p.affiliateLink);
+            if (newImageUrl && !(await validateImageUrl(newImageUrl))) newImageUrl = null;
+        }
+
+        // 2차: 네이버 쇼핑 폴백
+        if (!newImageUrl) {
+            newImageUrl = await fetchNaverFallbackImage(p.title);
+            if (newImageUrl && !(await validateImageUrl(newImageUrl))) {
+                newImageUrl = null;
+            }
         }
 
         if (newImageUrl) {
