@@ -58,6 +58,8 @@ function toCoupangAffiliateLink(url: string): string {
 function normalizeImgUrl(url: string | undefined, baseUrl: string): string | null {
     if (!url) return null;
     const u = url.trim();
+    // data: URI, blob: URI, placeholder 제외
+    if (u.startsWith("data:") || u.startsWith("blob:") || u === "" || u === "#") return null;
     if (u.startsWith("//")) return "https:" + u;
     if (u.startsWith("http")) return u;
     try {
@@ -330,8 +332,10 @@ async function validateImageUrl(url: string | null): Promise<boolean> {
         });
         const contentType = res.headers["content-type"] || "";
         if (res.status === 200 && contentType.startsWith("image/")) return true;
-        // HEAD는 성공했지만 content-type 없는 경우 → 유효로 간주
-        if (res.status === 200 && !contentType) return true;
+        // content-type 없으면 URL 확장자로 판단
+        if (res.status === 200 && !contentType) {
+            return /\.(jpe?g|png|gif|webp|avif|svg)(\?|$)/i.test(url);
+        }
     } catch {
         // HEAD 차단 서버 → GET으로 재시도 (첫 1바이트만)
         try {
@@ -342,7 +346,9 @@ async function validateImageUrl(url: string | null): Promise<boolean> {
                 responseType: "arraybuffer",
             });
             const contentType = res.headers["content-type"] || "";
-            return (res.status === 200 || res.status === 206) && (contentType.startsWith("image/") || !contentType);
+            if (contentType.startsWith("image/")) return true;
+            if (!contentType) return /\.(jpe?g|png|gif|webp|avif|svg)(\?|$)/i.test(url);
+            return false;
         } catch {
             return false;
         }
@@ -421,9 +427,14 @@ async function repairCommunityLinks() {
 
     let repaired = 0;
     for (const p of products) {
-        // affiliateLink 자체가 커뮤니티 포스트이므로 그 포스트에서 쇼핑몰 링크 추출
         const postUrl = p.affiliateLink || p.sourceUrl;
-        const referer = `https://${new URL(postUrl).hostname}/`;
+        let referer: string;
+        try {
+            referer = `https://${new URL(postUrl).hostname}/`;
+        } catch {
+            console.error(`[Link Repair] URL 파싱 실패: ${postUrl}`);
+            continue;
+        }
         const shopLink = await fetchShopLink(postUrl, referer);
 
         if (shopLink) {
@@ -876,7 +887,8 @@ async function runScrape() {
     }
     const expired = { count: hardExpired.count + softDeleted };
 
-    const [clienDeals, ppomppuDeals, ppomppuOverseaDeals, quasarzoneDeals, arcaDeals, naverDeals] = await Promise.all([
+    // Promise.allSettled: 소스 하나가 죽어도 나머지는 정상 수집
+    const [clienResult, ppomppuResult, ppomppuOverseaResult, quasarzoneResult, arcaResult, naverResult] = await Promise.allSettled([
         scrapeClien(),
         scrapePpomppu(),
         scrapePpomppuOversea(),
@@ -884,6 +896,12 @@ async function runScrape() {
         scrapeArcaLive(),
         scrapeNaverShopping(),
     ]);
+    const clienDeals = clienResult.status === "fulfilled" ? clienResult.value : (console.error("[Scrape] 클리앙 실패:", (clienResult as PromiseRejectedResult).reason), []);
+    const ppomppuDeals = ppomppuResult.status === "fulfilled" ? ppomppuResult.value : (console.error("[Scrape] 뽐뿌 실패:", (ppomppuResult as PromiseRejectedResult).reason), []);
+    const ppomppuOverseaDeals = ppomppuOverseaResult.status === "fulfilled" ? ppomppuOverseaResult.value : (console.error("[Scrape] 해외뽐뿌 실패:", (ppomppuOverseaResult as PromiseRejectedResult).reason), []);
+    const quasarzoneDeals = quasarzoneResult.status === "fulfilled" ? quasarzoneResult.value : (console.error("[Scrape] 퀘이사존 실패:", (quasarzoneResult as PromiseRejectedResult).reason), []);
+    const arcaDeals = arcaResult.status === "fulfilled" ? arcaResult.value : (console.error("[Scrape] 아카라이브 실패:", (arcaResult as PromiseRejectedResult).reason), []);
+    const naverDeals = naverResult.status === "fulfilled" ? naverResult.value : (console.error("[Scrape] 네이버쇼핑 실패:", (naverResult as PromiseRejectedResult).reason), []);
 
     const allDeals = interleaveDeals(clienDeals, ppomppuDeals, ppomppuOverseaDeals, quasarzoneDeals, arcaDeals, naverDeals);
     const sourceStats = {

@@ -142,12 +142,14 @@ async function extractShopLink(postUrl: string): Promise<string | null> {
 
 export async function POST() {
     try {
-        // 커뮤니티 URL이 affiliateLink로 남아있는 상품 전체 조회
+        // 커뮤니티 URL이 affiliateLink로 남아있는 상품 (최대 10개씩 처리, 60초 타임아웃 방지)
         const products = await prisma.product.findMany({
             where: {
                 OR: COMMUNITY_DOMAINS.map(d => ({ affiliateLink: { contains: d } })),
             },
             select: { id: true, title: true, affiliateLink: true, sourceUrl: true },
+            orderBy: { createdAt: "desc" },
+            take: 10,
         });
 
         let updated = 0;
@@ -162,7 +164,7 @@ export async function POST() {
                 });
                 updated++;
             }
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 200));
         }
 
         return NextResponse.json({

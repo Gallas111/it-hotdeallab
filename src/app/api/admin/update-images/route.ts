@@ -136,6 +136,12 @@ export async function POST(request: Request) {
             });
         }
 
+        // 빈 문자열 이미지도 null로 초기화
+        await prisma.product.updateMany({
+            where: { imageUrl: "" },
+            data: { imageUrl: null },
+        });
+
         // Step 2: imageUrl이 없는 상품 처리 (최대 30개)
         const products = await prisma.product.findMany({
             where: { imageUrl: null },

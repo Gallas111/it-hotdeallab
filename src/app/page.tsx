@@ -26,7 +26,7 @@ export default async function Home({
   const { category, q, sort } = await searchParams;
   const sortKey = parseSortKey(sort);
 
-  const { deals, hasMore } = await queryDeals({ category, q, sort: sortKey });
+  const { deals, hasMore } = await queryDeals({ category, q, sort: sortKey }).catch(() => ({ deals: [], hasMore: false }));
 
   const sectionTitle = q
     ? `"${q}" 검색 결과`

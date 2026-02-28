@@ -63,11 +63,11 @@ function getCtaLabel(affiliateLink: string, mallName: string): string {
 
 export default async function DealDetail({ params }: { params: Promise<{ slug: string }> }) {
     const { slug: id } = await params;
-    const p = await getProductById(id);
+    const p = await getProductById(id).catch(() => null);
     if (!p) notFound();
 
-    const similarDeals = await getSimilarDeals(p.id, p.category, 4);
-    const pros = p.aiPros.split(",").map(s => s.trim()).filter(Boolean);
+    const similarDeals = await getSimilarDeals(p.id, p.category, 4).catch(() => []);
+    const pros = (p.aiPros || "").split(",").map((s: string) => s.trim()).filter(Boolean);
 
     const timeAgo = (() => {
         const diff = Date.now() - new Date(p.createdAt).getTime();
