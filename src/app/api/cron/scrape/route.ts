@@ -401,6 +401,53 @@ async function repairMissingImages() {
     }
 }
 
+// ─── 커뮤니티 링크 자동 교체 ─────────────────────────────────
+const COMMUNITY_LINK_DOMAINS = ["clien.net", "ppomppu.co.kr", "ruliweb.com", "quasarzone.com"];
+const isCommunityLink = (url: string) => COMMUNITY_LINK_DOMAINS.some(d => url.includes(d));
+
+async function repairCommunityLinks() {
+    const products = await prisma.product.findMany({
+        where: {
+            isActive: true,
+            OR: COMMUNITY_LINK_DOMAINS.map(d => ({ affiliateLink: { contains: d } })),
+        },
+        select: { id: true, title: true, affiliateLink: true, sourceUrl: true },
+        orderBy: { createdAt: "desc" },
+        take: 5, // 매 실행마다 최대 5개씩 처리
+    });
+
+    if (products.length === 0) return;
+    console.log(`[Link Repair] ${products.length}개 커뮤니티 링크 교체 시도`);
+
+    let repaired = 0;
+    for (const p of products) {
+        // affiliateLink 자체가 커뮤니티 포스트이므로 그 포스트에서 쇼핑몰 링크 추출
+        const postUrl = p.affiliateLink || p.sourceUrl;
+        const referer = `https://${new URL(postUrl).hostname}/`;
+        const shopLink = await fetchShopLink(postUrl, referer);
+
+        if (shopLink) {
+            await prisma.product.update({
+                where: { id: p.id },
+                data: { affiliateLink: toCoupangAffiliateLink(shopLink) },
+            });
+            repaired++;
+            console.log(`[Link Repair] ✓ ${p.title}`);
+        } else {
+            // 쇼핑몰 링크를 찾지 못하면 비활성화 (더 이상 표시 안 함)
+            await prisma.product.update({
+                where: { id: p.id },
+                data: { isActive: false },
+            });
+            console.log(`[Link Repair] 삭제 (링크 없음): ${p.title}`);
+        }
+    }
+
+    if (repaired > 0) {
+        console.log(`[Link Repair] ${repaired}/${products.length}개 교체 완료`);
+    }
+}
+
 // ─── 텔레그램 모니터링 경고 ──────────────────────────────────
 async function sendTelegramMonitorAlert(sourceStats: Record<string, number>, totalDeals: number) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -1031,6 +1078,9 @@ async function runScrape() {
 
     // 이미지 없는 기존 제품 자동 복구 (매 실행마다)
     await repairMissingImages().catch(err => console.error("[Image Repair] Error:", err));
+
+    // 커뮤니티 링크 → 쇼핑몰 링크 자동 교체 (매 실행마다)
+    await repairCommunityLinks().catch(err => console.error("[Link Repair] Error:", err));
 
     console.log("Scrape done:", { expired: expired.count, added: results.length, sourceStats });
 }

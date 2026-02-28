@@ -34,7 +34,7 @@ const SHOP_DOMAINS = [
     "woot.com", "costco.com", "asus.com",
 ];
 
-const COMMUNITY_DOMAINS = ["clien.net", "ppomppu.co.kr", "ruliweb.com", "bbs.ruliweb"];
+const COMMUNITY_DOMAINS = ["clien.net", "ppomppu.co.kr", "ruliweb.com", "bbs.ruliweb", "quasarzone.com"];
 const isShopLink = (url: string) => SHOP_DOMAINS.some(d => url.includes(d));
 const isCommunityLink = (url: string) => COMMUNITY_DOMAINS.some(d => url.includes(d));
 
@@ -98,7 +98,25 @@ async function extractShopLink(postUrl: string): Promise<string | null> {
             });
         }
 
-        // 4. 전체 페이지 href
+        // 4. 퀘이사존 data-href / 외부 링크 패턴
+        if (!found && postUrl.includes("quasarzone")) {
+            $("a[data-href], a[href*='link'], a.link-buy, a.btn-buy, .deal-link a, .external-link").each((_, el) => {
+                if (found) return;
+                const href = $(el).attr("data-href") || $(el).attr("href") || "";
+                if (href.startsWith("http") && isShopLink(href)) found = href;
+            });
+            // quasarzone onclick URL 추출
+            if (!found) {
+                $("a[onclick]").each((_, el) => {
+                    if (found) return;
+                    const onclick = $(el).attr("onclick") || "";
+                    const m = onclick.match(/https?:\/\/[^\s'"]+/);
+                    if (m && isShopLink(m[0])) found = m[0];
+                });
+            }
+        }
+
+        // 5. 전체 페이지 href
         if (!found) {
             $("a[href]").each((_, el) => {
                 if (found) return;
@@ -107,7 +125,7 @@ async function extractShopLink(postUrl: string): Promise<string | null> {
             });
         }
 
-        // 5. 페이지 텍스트에서 URL 직접 추출 (뽐뿌 텍스트 노출 URL)
+        // 6. 페이지 텍스트에서 URL 직접 추출 (뽐뿌/퀘이사존 텍스트 노출 URL)
         if (!found) {
             const bodyText = $.root().text();
             const urlMatches = bodyText.match(/https?:\/\/[^\s"'<>]+/g) || [];
