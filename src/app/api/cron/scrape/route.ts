@@ -590,7 +590,7 @@ async function runSiteHealthCheck() {
             description: `Vercel 이미지 최적화 402 에러 ${img402}건 - next/image → img 태그 교체 필요`,
         });
         if (codeFixResult) fixes.push(codeFixResult);
-        else unfixable.push(`이미지 402 에러 ${img402}건 - 자동 수정 시도했으나 실패`);
+        else issues.push(`이미지 402 에러 ${img402}건 - 자동 수정 시도했으나 실패`);
     }
 
     // 깨진 이미지 자동 교체: 쇼핑몰 og:image → 네이버 폴백
