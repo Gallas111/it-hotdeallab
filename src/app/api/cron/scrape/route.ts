@@ -530,69 +530,89 @@ async function sendTelegramMonitorAlert(sourceStats: Record<string, number>, tot
     } catch { /* 무시 */ }
 }
 
-// ─── 사이트 상태 자동 점검 (크롤링마다 실행) ─────────────────
+// ─── 사이트 상태 자동 점검 + 자동 수정 (크롤링마다 실행) ─────
 async function runSiteHealthCheck() {
     const issues: string[] = [];
+    const fixes: string[] = [];
+    const unfixable: string[] = [];
     const SITE = "https://ithotdealab.com";
 
     // 1. 메인 페이지 접속 확인
     try {
         const res = await axios.get(SITE, { timeout: 10000, maxRedirects: 5 });
-        if (res.status !== 200) issues.push(`메인 페이지 HTTP ${res.status}`);
+        if (res.status !== 200) unfixable.push(`메인 페이지 HTTP ${res.status} (Vercel 배포 상태 확인 필요)`);
     } catch (e: any) {
-        issues.push(`메인 페이지 접속 실패: ${e.message}`);
+        unfixable.push(`메인 페이지 접속 실패: ${e.message}`);
     }
 
-    // 2. 이미지 HTTP 상태 점검 (최근 딜 5개 샘플링)
+    // 2. 이미지 HTTP 상태 점검 + 자동 교체 (최근 20개 샘플링)
     const sampleProducts = await prisma.product.findMany({
         where: { isActive: true, imageUrl: { not: null } },
-        select: { id: true, title: true, imageUrl: true },
+        select: { id: true, title: true, imageUrl: true, affiliateLink: true },
         orderBy: { createdAt: "desc" },
-        take: 5,
+        take: 20,
     });
 
-    let imgBroken = 0;
+    let imgFixed = 0;
     let img402 = 0;
+    const brokenImageProducts: typeof sampleProducts = [];
+
     for (const p of sampleProducts) {
         if (!p.imageUrl) continue;
-
-        // next/image 프록시 경유 URL과 원본 URL 모두 체크
-        const urlsToCheck = [
-            p.imageUrl, // 원본 이미지 직접 체크
-            `${SITE}/_next/image?url=${encodeURIComponent(p.imageUrl)}&w=256&q=75`, // next/image 프록시 체크
-        ];
-
-        for (const url of urlsToCheck) {
-            try {
-                const res = await axios.head(url, {
-                    timeout: 5000,
-                    headers: { "User-Agent": HEADERS["User-Agent"] },
-                    maxRedirects: 3,
-                    validateStatus: () => true,
-                });
-                if (res.status === 402) {
-                    img402++;
-                    break; // 한 제품에서 402면 더 체크 불필요
-                }
-                if (res.status >= 400) imgBroken++;
-            } catch {
-                // 타임아웃 등은 무시
-            }
+        try {
+            const res = await axios.head(p.imageUrl, {
+                timeout: 5000,
+                headers: { "User-Agent": HEADERS["User-Agent"] },
+                maxRedirects: 3,
+                validateStatus: () => true,
+            });
+            if (res.status === 402) img402++;
+            if (res.status >= 400) brokenImageProducts.push(p);
+        } catch {
+            brokenImageProducts.push(p);
         }
     }
 
     if (img402 > 0) {
-        issues.push(`이미지 402 에러 ${img402}건 - Vercel 이미지 최적화 한도 초과! next/image 사용 중이면 <img>로 교체 필요`);
+        unfixable.push(`이미지 402 에러 ${img402}건 - Vercel 이미지 최적화 한도 초과 (next/image 사용 시 <img>로 교체 필요)`);
     }
-    if (imgBroken > 2) {
-        issues.push(`이미지 로드 실패 ${imgBroken}건 (5개 중)`);
+
+    // 깨진 이미지 자동 교체: 쇼핑몰 og:image → 네이버 폴백
+    for (const p of brokenImageProducts) {
+        let newUrl: string | null = null;
+
+        // 1차: 쇼핑몰 페이지에서 og:image 재추출
+        if (p.affiliateLink) {
+            newUrl = await fetchShopImage(p.affiliateLink);
+            if (newUrl && newUrl === p.imageUrl) newUrl = null; // 같은 URL이면 스킵
+            if (newUrl && !(await validateImageUrl(newUrl))) newUrl = null;
+        }
+
+        // 2차: 네이버 쇼핑 이미지 검색 폴백
+        if (!newUrl) {
+            newUrl = await fetchNaverFallbackImage(p.title);
+            if (newUrl && !(await validateImageUrl(newUrl))) newUrl = null;
+        }
+
+        if (newUrl) {
+            await prisma.product.update({ where: { id: p.id }, data: { imageUrl: newUrl } });
+            imgFixed++;
+            console.log(`[Auto Fix] 이미지 교체: ${p.title}`);
+        } else {
+            // 이미지를 null로 설정해서 프론트에서 폴백 아이콘 표시
+            await prisma.product.update({ where: { id: p.id }, data: { imageUrl: null } });
+            console.log(`[Auto Fix] 이미지 제거(폴백표시): ${p.title}`);
+        }
+    }
+    if (brokenImageProducts.length > 0) {
+        fixes.push(`깨진 이미지 ${brokenImageProducts.length}건 발견 → ${imgFixed}건 새 이미지로 교체, ${brokenImageProducts.length - imgFixed}건 폴백 처리`);
     }
 
     // 3. 헬스체크 API 확인
     try {
         const res = await axios.get(`${SITE}/api/monitor/health`, { timeout: 10000 });
         if (res.data?.status !== "healthy") {
-            issues.push(`헬스체크 비정상: ${JSON.stringify(res.data)}`);
+            issues.push(`헬스체크 비정상: 딜 ${res.data?.totalDeals}개, 최신 ${res.data?.hoursSinceLatest}시간 전`);
         }
     } catch (e: any) {
         issues.push(`헬스체크 API 실패: ${e.message}`);
@@ -600,17 +620,17 @@ async function runSiteHealthCheck() {
 
     // 4. DB 상태 체크
     const totalActive = await prisma.product.count({ where: { isActive: true } });
-    if (totalActive < 5) issues.push(`활성 딜 ${totalActive}개 (5개 미만)`);
+    if (totalActive < 5) unfixable.push(`활성 딜 ${totalActive}개 (5개 미만 - 크롤링 소스 확인 필요)`);
 
     const noImageCount = await prisma.product.count({
         where: { isActive: true, OR: [{ imageUrl: null }, { imageUrl: "" }] },
     });
-    if (noImageCount > totalActive * 0.5) {
-        issues.push(`이미지 없는 딜 ${noImageCount}/${totalActive}개 (50% 초과)`);
+    if (noImageCount > totalActive * 0.3) {
+        issues.push(`이미지 없는 딜 ${noImageCount}/${totalActive}개 (30% 초과)`);
     }
 
-    // 5. 커뮤니티 링크 잔존 체크
-    const communityLinkCount = await prisma.product.count({
+    // 5. 커뮤니티 링크 자동 교체 (잔존분 추가 처리)
+    const communityProducts = await prisma.product.findMany({
         where: {
             isActive: true,
             OR: [
@@ -621,32 +641,99 @@ async function runSiteHealthCheck() {
                 { affiliateLink: { contains: "arca.live" } },
             ],
         },
+        select: { id: true, title: true, affiliateLink: true, sourceUrl: true, mallName: true },
+        take: 10,
     });
-    if (communityLinkCount > 0) {
-        issues.push(`커뮤니티 링크 잔존 ${communityLinkCount}건`);
+
+    if (communityProducts.length > 0) {
+        let linkFixed = 0;
+        let linkRemoved = 0;
+        for (const p of communityProducts) {
+            const postUrl = p.affiliateLink || p.sourceUrl;
+            let referer: string;
+            try { referer = `https://${new URL(postUrl).hostname}/`; } catch { continue; }
+
+            const shopLink = await fetchShopLink(postUrl, referer);
+            if (shopLink) {
+                const finalLink = toAliexpressAffiliateLink(toCoupangAffiliateLink(shopLink));
+                await prisma.product.update({
+                    where: { id: p.id },
+                    data: { affiliateLink: finalLink, mallName: getMallNameFromLink(finalLink, p.mallName || "쇼핑몰") },
+                });
+                linkFixed++;
+            } else {
+                await prisma.product.update({ where: { id: p.id }, data: { isActive: false } });
+                linkRemoved++;
+            }
+        }
+        fixes.push(`커뮤니티 링크 ${communityProducts.length}건 → ${linkFixed}건 쇼핑몰로 교체, ${linkRemoved}건 비활성화`);
     }
 
-    // 문제 발견 시 텔레그램 알림
-    if (issues.length > 0) {
-        console.log(`[Health Check] ${issues.length}건 문제 발견:`, issues);
-        await sendTelegramHealthAlert(issues);
+    // 6. 가격 이상 자동 수정 (할인가 > 정가 등)
+    const priceAnomalies = await prisma.product.findMany({
+        where: {
+            isActive: true,
+            originalPrice: { gt: 0 },
+            salePrice: { gt: 0 },
+        },
+        select: { id: true, title: true, originalPrice: true, salePrice: true, discountPercent: true },
+    });
+    let priceFixed = 0;
+    for (const p of priceAnomalies) {
+        if (p.salePrice > p.originalPrice) {
+            // 할인가가 정가보다 높으면 스왑
+            await prisma.product.update({
+                where: { id: p.id },
+                data: {
+                    originalPrice: p.salePrice,
+                    salePrice: p.originalPrice,
+                    discountPercent: Math.round(((p.salePrice - p.originalPrice) / p.salePrice) * 100),
+                },
+            });
+            priceFixed++;
+            console.log(`[Auto Fix] 가격 스왑: ${p.title} (${p.salePrice}→정가, ${p.originalPrice}→할인가)`);
+        } else if (p.discountPercent === 0 && p.originalPrice > p.salePrice) {
+            // 할인율 미계산된 경우 자동 계산
+            const disc = Math.round(((p.originalPrice - p.salePrice) / p.originalPrice) * 100);
+            await prisma.product.update({ where: { id: p.id }, data: { discountPercent: disc } });
+            priceFixed++;
+        }
+    }
+    if (priceFixed > 0) fixes.push(`가격 이상 ${priceFixed}건 자동 수정`);
+
+    // 결과 정리 및 알림
+    const allIssues = [...issues, ...unfixable];
+    if (fixes.length > 0 || allIssues.length > 0) {
+        console.log(`[Health Check] 수정: ${fixes.length}건, 미해결: ${allIssues.length}건`);
+        await sendTelegramHealthAlert(fixes, allIssues);
     } else {
         console.log("[Health Check] 사이트 정상");
     }
 }
 
-async function sendTelegramHealthAlert(issues: string[]) {
+async function sendTelegramHealthAlert(fixes: string[], issues: string[]) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     const chatId = process.env.TELEGRAM_CHAT_ID;
     if (!token || !chatId) return;
 
+    const lines: string[] = [];
+
+    if (fixes.length > 0) {
+        lines.push(`🔧 자동 수정 완료:`);
+        fixes.forEach(f => lines.push(`  ✅ ${f}`));
+    }
+    if (issues.length > 0) {
+        if (fixes.length > 0) lines.push(``);
+        lines.push(`⚠️ 수동 확인 필요:`);
+        issues.forEach(i => lines.push(`  🔴 ${i}`));
+    }
+
     const text = [
-        `🚨 IT핫딜랩 사이트 점검 이상 발견!`,
+        `🩺 IT핫딜랩 사이트 점검 리포트`,
         ``,
-        ...issues.map((issue, i) => `${i + 1}. ${issue}`),
+        ...lines,
         ``,
         `🔗 https://ithotdealab.com`,
-        `⚙️ https://ithotdealab.com/admin`,
     ].join("\n");
 
     try {
