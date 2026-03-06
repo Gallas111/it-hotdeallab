@@ -534,15 +534,25 @@ async function sendTelegramMonitorAlert(sourceStats: Record<string, number>, tot
 async function runSiteHealthCheck() {
     const issues: string[] = [];
     const fixes: string[] = [];
-    const unfixable: string[] = [];
     const SITE = "https://ithotdealab.com";
 
     // 1. 메인 페이지 접속 확인
     try {
         const res = await axios.get(SITE, { timeout: 10000, maxRedirects: 5 });
-        if (res.status !== 200) unfixable.push(`메인 페이지 HTTP ${res.status} (Vercel 배포 상태 확인 필요)`);
+        if (res.status === 500 || res.status === 502 || res.status === 503) {
+            // 서버 에러 → 코드 문제일 수 있으므로 자동 수정 시도
+            const codeFixResult = await autoFixCodeIssue({
+                type: "component-error",
+                description: `메인 페이지 HTTP ${res.status} 서버 에러`,
+                errorLog: typeof res.data === "string" ? res.data.slice(0, 2000) : undefined,
+            });
+            if (codeFixResult) fixes.push(codeFixResult);
+            else issues.push(`메인 페이지 HTTP ${res.status}`);
+        } else if (res.status !== 200) {
+            issues.push(`메인 페이지 HTTP ${res.status}`);
+        }
     } catch (e: any) {
-        unfixable.push(`메인 페이지 접속 실패: ${e.message}`);
+        issues.push(`메인 페이지 접속 실패: ${e.message}`);
     }
 
     // 2. 이미지 HTTP 상태 점검 + 자동 교체 (최근 20개 샘플링)
@@ -574,7 +584,13 @@ async function runSiteHealthCheck() {
     }
 
     if (img402 > 0) {
-        unfixable.push(`이미지 402 에러 ${img402}건 - Vercel 이미지 최적화 한도 초과 (next/image 사용 시 <img>로 교체 필요)`);
+        // 402 = Vercel 이미지 최적화 한도 초과 → 코드에서 next/image 사용 여부 확인 후 자동 수정
+        const codeFixResult = await autoFixCodeIssue({
+            type: "image-402",
+            description: `Vercel 이미지 최적화 402 에러 ${img402}건 - next/image → img 태그 교체 필요`,
+        });
+        if (codeFixResult) fixes.push(codeFixResult);
+        else unfixable.push(`이미지 402 에러 ${img402}건 - 자동 수정 시도했으나 실패`);
     }
 
     // 깨진 이미지 자동 교체: 쇼핑몰 og:image → 네이버 폴백
@@ -620,7 +636,7 @@ async function runSiteHealthCheck() {
 
     // 4. DB 상태 체크
     const totalActive = await prisma.product.count({ where: { isActive: true } });
-    if (totalActive < 5) unfixable.push(`활성 딜 ${totalActive}개 (5개 미만 - 크롤링 소스 확인 필요)`);
+    if (totalActive < 5) issues.push(`활성 딜 ${totalActive}개 (5개 미만 - 크롤링 소스 확인 필요)`);
 
     const noImageCount = await prisma.product.count({
         where: { isActive: true, OR: [{ imageUrl: null }, { imageUrl: "" }] },
@@ -702,12 +718,177 @@ async function runSiteHealthCheck() {
     if (priceFixed > 0) fixes.push(`가격 이상 ${priceFixed}건 자동 수정`);
 
     // 결과 정리 및 알림
-    const allIssues = [...issues, ...unfixable];
-    if (fixes.length > 0 || allIssues.length > 0) {
-        console.log(`[Health Check] 수정: ${fixes.length}건, 미해결: ${allIssues.length}건`);
-        await sendTelegramHealthAlert(fixes, allIssues);
+    if (fixes.length > 0 || issues.length > 0) {
+        console.log(`[Health Check] 수정: ${fixes.length}건, 미해결: ${issues.length}건`);
+        await sendTelegramHealthAlert(fixes, issues);
     } else {
         console.log("[Health Check] 사이트 정상");
+    }
+}
+
+// ─── 코드 레벨 자동 수정 (GitHub 커밋 → Vercel 배포) ────────
+const REPO = "Gallas111/it-hotdeallab";
+
+interface CodeIssue {
+    type: "image-402" | "build-error" | "component-error" | "api-error";
+    description: string;
+    errorLog?: string;
+}
+
+// 문제 유형별 수정 대상 파일 & 프롬프트 매핑
+const CODE_FIX_RULES: Record<string, { files: string[]; prompt: string }> = {
+    "image-402": {
+        files: ["src/components/DealImage.tsx", "src/app/deal/[slug]/page.tsx"],
+        prompt: `Vercel Hobby 플랜의 이미지 최적화 월간 한도(1,000건)가 초과되어 모든 이미지에서 402 Payment Required 에러가 발생하고 있습니다.
+
+수정 방법:
+- next/image의 <Image> 컴포넌트를 일반 <img> 태그로 교체
+- import Image from "next/image" 제거
+- fill 속성 대신 CSS로 동일한 레이아웃 구현 (position:absolute, width:100%, height:100%, object-fit:cover)
+- loading="lazy" 추가로 성능 유지
+- 기존 onError, fallback 등 에러 핸들링 로직은 반드시 유지`,
+    },
+    "component-error": {
+        files: ["src/components/DealImage.tsx", "src/components/DealCard.tsx", "src/components/ShareButtons.tsx"],
+        prompt: `프론트엔드 컴포넌트에서 런타임 에러가 발생하고 있습니다. 에러 로그를 분석하여 수정하세요.
+- 타입 에러, null 참조, undefined 접근 등을 방어적으로 수정
+- 기존 기능은 모두 유지`,
+    },
+    "api-error": {
+        files: ["src/app/api/cron/scrape/route.ts"],
+        prompt: `API 라우트에서 에러가 발생하고 있습니다. 에러 로그를 분석하여 수정하세요.
+- import 경로, 타입 에러, 런타임 에러 등을 수정
+- 기존 로직 유지, 최소한의 변경만`,
+    },
+};
+
+async function autoFixCodeIssue(issue: CodeIssue): Promise<string | null> {
+    const githubToken = process.env.GITHUB_TOKEN;
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!githubToken || !geminiKey) {
+        console.log("[Code Fix] GITHUB_TOKEN 또는 GEMINI_API_KEY 미설정");
+        return null;
+    }
+
+    const rule = CODE_FIX_RULES[issue.type];
+    if (!rule) return null;
+
+    try {
+        // 최근 30분 내 자동수정 커밋이 있으면 스킵 (무한루프 방지)
+        const commitsRes = await fetch(
+            `https://api.github.com/repos/${REPO}/commits?per_page=3`,
+            { headers: { Authorization: `token ${githubToken}`, Accept: "application/vnd.github.v3+json" } }
+        );
+        const commits = await commitsRes.json();
+        if (Array.isArray(commits)) {
+            const recentAutoFix = commits.find((c: any) =>
+                c.commit?.message?.includes("[자동수정]") &&
+                (Date.now() - new Date(c.commit.committer.date).getTime()) < 30 * 60 * 1000
+            );
+            if (recentAutoFix) {
+                console.log("[Code Fix] 최근 30분 내 자동수정 이력 있음, 스킵");
+                return null;
+            }
+        }
+
+        // 대상 파일들의 현재 코드 가져오기
+        const fileContents: { path: string; content: string; sha: string }[] = [];
+        for (const filePath of rule.files) {
+            try {
+                const res = await fetch(
+                    `https://api.github.com/repos/${REPO}/contents/${filePath}`,
+                    { headers: { Authorization: `token ${githubToken}`, Accept: "application/vnd.github.v3+json" } }
+                );
+                if (!res.ok) continue;
+                const data = await res.json();
+                fileContents.push({
+                    path: filePath,
+                    content: Buffer.from(data.content, "base64").toString("utf-8"),
+                    sha: data.sha,
+                });
+            } catch { continue; }
+        }
+
+        if (fileContents.length === 0) return null;
+
+        // Gemini에게 수정 요청
+        const genai = new GoogleGenAI({ apiKey: geminiKey });
+        const filesContext = fileContents.map(f =>
+            `=== ${f.path} ===\n\`\`\`typescript\n${f.content}\n\`\`\``
+        ).join("\n\n");
+
+        const response = await genai.models.generateContent({
+            model: "gemini-2.5-flash-lite",
+            contents: `당신은 Next.js/TypeScript 전문 개발자입니다. 프로덕션 사이트에서 다음 문제가 발생했습니다:
+
+문제: ${issue.description}
+${issue.errorLog ? `에러 로그: ${issue.errorLog}` : ""}
+
+${rule.prompt}
+
+현재 파일들:
+${filesContext}
+
+반드시 아래 JSON 형식으로만 응답하세요 (설명 없이):
+[{"path": "파일경로", "content": "수정된 전체 파일 내용"}, ...]
+
+수정이 필요 없는 파일은 배열에 포함하지 마세요.
+수정할 내용이 없으면 빈 배열 []을 반환하세요.`,
+        });
+
+        const raw = (response.text ?? "").trim();
+        const jsonMatch = raw.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) {
+            console.log("[Code Fix] Gemini 응답에서 JSON 파싱 실패");
+            return null;
+        }
+
+        const fileFixes: { path: string; content: string }[] = JSON.parse(jsonMatch[0]);
+        if (fileFixes.length === 0) {
+            console.log("[Code Fix] 수정할 내용 없음");
+            return null;
+        }
+
+        // 각 파일별로 GitHub에 커밋
+        const fixedFiles: string[] = [];
+        for (const fix of fileFixes) {
+            const original = fileContents.find(f => f.path === fix.path);
+            if (!original) continue;
+            if (original.content.trim() === fix.content.trim()) continue; // 변경 없음
+
+            const commitRes = await fetch(
+                `https://api.github.com/repos/${REPO}/contents/${fix.path}`,
+                {
+                    method: "PUT",
+                    headers: {
+                        Authorization: `token ${githubToken}`,
+                        Accept: "application/vnd.github.v3+json",
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        message: `[자동수정] ${issue.type}: ${issue.description.slice(0, 50)}`,
+                        content: Buffer.from(fix.content).toString("base64"),
+                        sha: original.sha,
+                    }),
+                }
+            );
+
+            if (commitRes.ok) {
+                fixedFiles.push(fix.path);
+                console.log(`[Code Fix] ${fix.path} 커밋 성공`);
+            } else {
+                console.log(`[Code Fix] ${fix.path} 커밋 실패:`, await commitRes.text());
+            }
+        }
+
+        if (fixedFiles.length > 0) {
+            return `코드 자동 수정: ${fixedFiles.join(", ")} (${issue.description.slice(0, 40)}) → 배포 중`;
+        }
+        return null;
+
+    } catch (e: any) {
+        console.error("[Code Fix] 에러:", e.message);
+        return null;
     }
 }
 
