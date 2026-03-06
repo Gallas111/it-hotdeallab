@@ -530,6 +530,133 @@ async function sendTelegramMonitorAlert(sourceStats: Record<string, number>, tot
     } catch { /* 무시 */ }
 }
 
+// ─── 사이트 상태 자동 점검 (크롤링마다 실행) ─────────────────
+async function runSiteHealthCheck() {
+    const issues: string[] = [];
+    const SITE = "https://ithotdealab.com";
+
+    // 1. 메인 페이지 접속 확인
+    try {
+        const res = await axios.get(SITE, { timeout: 10000, maxRedirects: 5 });
+        if (res.status !== 200) issues.push(`메인 페이지 HTTP ${res.status}`);
+    } catch (e: any) {
+        issues.push(`메인 페이지 접속 실패: ${e.message}`);
+    }
+
+    // 2. 이미지 HTTP 상태 점검 (최근 딜 5개 샘플링)
+    const sampleProducts = await prisma.product.findMany({
+        where: { isActive: true, imageUrl: { not: null } },
+        select: { id: true, title: true, imageUrl: true },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+    });
+
+    let imgBroken = 0;
+    let img402 = 0;
+    for (const p of sampleProducts) {
+        if (!p.imageUrl) continue;
+
+        // next/image 프록시 경유 URL과 원본 URL 모두 체크
+        const urlsToCheck = [
+            p.imageUrl, // 원본 이미지 직접 체크
+            `${SITE}/_next/image?url=${encodeURIComponent(p.imageUrl)}&w=256&q=75`, // next/image 프록시 체크
+        ];
+
+        for (const url of urlsToCheck) {
+            try {
+                const res = await axios.head(url, {
+                    timeout: 5000,
+                    headers: { "User-Agent": HEADERS["User-Agent"] },
+                    maxRedirects: 3,
+                    validateStatus: () => true,
+                });
+                if (res.status === 402) {
+                    img402++;
+                    break; // 한 제품에서 402면 더 체크 불필요
+                }
+                if (res.status >= 400) imgBroken++;
+            } catch {
+                // 타임아웃 등은 무시
+            }
+        }
+    }
+
+    if (img402 > 0) {
+        issues.push(`이미지 402 에러 ${img402}건 - Vercel 이미지 최적화 한도 초과! next/image 사용 중이면 <img>로 교체 필요`);
+    }
+    if (imgBroken > 2) {
+        issues.push(`이미지 로드 실패 ${imgBroken}건 (5개 중)`);
+    }
+
+    // 3. 헬스체크 API 확인
+    try {
+        const res = await axios.get(`${SITE}/api/monitor/health`, { timeout: 10000 });
+        if (res.data?.status !== "healthy") {
+            issues.push(`헬스체크 비정상: ${JSON.stringify(res.data)}`);
+        }
+    } catch (e: any) {
+        issues.push(`헬스체크 API 실패: ${e.message}`);
+    }
+
+    // 4. DB 상태 체크
+    const totalActive = await prisma.product.count({ where: { isActive: true } });
+    if (totalActive < 5) issues.push(`활성 딜 ${totalActive}개 (5개 미만)`);
+
+    const noImageCount = await prisma.product.count({
+        where: { isActive: true, OR: [{ imageUrl: null }, { imageUrl: "" }] },
+    });
+    if (noImageCount > totalActive * 0.5) {
+        issues.push(`이미지 없는 딜 ${noImageCount}/${totalActive}개 (50% 초과)`);
+    }
+
+    // 5. 커뮤니티 링크 잔존 체크
+    const communityLinkCount = await prisma.product.count({
+        where: {
+            isActive: true,
+            OR: [
+                { affiliateLink: { contains: "clien.net" } },
+                { affiliateLink: { contains: "ppomppu.co.kr" } },
+                { affiliateLink: { contains: "ruliweb.com" } },
+                { affiliateLink: { contains: "quasarzone.com" } },
+                { affiliateLink: { contains: "arca.live" } },
+            ],
+        },
+    });
+    if (communityLinkCount > 0) {
+        issues.push(`커뮤니티 링크 잔존 ${communityLinkCount}건`);
+    }
+
+    // 문제 발견 시 텔레그램 알림
+    if (issues.length > 0) {
+        console.log(`[Health Check] ${issues.length}건 문제 발견:`, issues);
+        await sendTelegramHealthAlert(issues);
+    } else {
+        console.log("[Health Check] 사이트 정상");
+    }
+}
+
+async function sendTelegramHealthAlert(issues: string[]) {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
+    if (!token || !chatId) return;
+
+    const text = [
+        `🚨 IT핫딜랩 사이트 점검 이상 발견!`,
+        ``,
+        ...issues.map((issue, i) => `${i + 1}. ${issue}`),
+        ``,
+        `🔗 https://ithotdealab.com`,
+        `⚙️ https://ithotdealab.com/admin`,
+    ].join("\n");
+
+    try {
+        await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+            chat_id: chatId,
+            text,
+        });
+    } catch { /* 무시 */ }
+}
+
 // ─── 카테고리 후처리 보정 (AI 오분류 방지) ──────────────────
 // \b는 한글에서 작동하지 않으므로 사용하지 않음
 const BRAND_CATEGORY_RULES: { pattern: RegExp; category: string }[] = [
@@ -1143,6 +1270,9 @@ async function runScrape() {
 
     // 커뮤니티 링크 → 쇼핑몰 링크 자동 교체 (매 실행마다)
     await repairCommunityLinks().catch(err => console.error("[Link Repair] Error:", err));
+
+    // 사이트 상태 점검 (매 실행마다)
+    await runSiteHealthCheck().catch(err => console.error("[Health Check] Error:", err));
 
     console.log("Scrape done:", { expired: expired.count, added: results.length, sourceStats });
 }
