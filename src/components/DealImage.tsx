@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useState, useRef } from "react";
 
 interface DealImageProps {
@@ -47,13 +46,17 @@ export default function DealImage({ productId, imageUrl, alt, fill, style }: Dea
         );
     }
 
+    const imgStyle: React.CSSProperties = fill
+        ? { position: "absolute", width: "100%", height: "100%", inset: 0, ...style }
+        : { ...style };
+
     return (
-        <Image
+        <img
             src={imgSrc}
             alt={alt}
-            fill={fill}
-            style={style}
+            style={imgStyle}
             onError={handleImgError}
+            loading="lazy"
         />
     );
 }
