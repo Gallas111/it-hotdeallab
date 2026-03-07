@@ -10,6 +10,16 @@ import DealImage from "@/components/DealImage";
 
 export const revalidate = 1800; // 30분마다 ISR 재생성
 
+export async function generateStaticParams() {
+    const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const products = await prisma.product.findMany({
+        where: { createdAt: { gte: cutoff } },
+        select: { id: true },
+        orderBy: { createdAt: "desc" },
+    });
+    return products.map((p) => ({ slug: p.id }));
+}
+
 async function getProductById(id: string) {
     return prisma.product.findUnique({ where: { id } });
 }
