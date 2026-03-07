@@ -3,7 +3,7 @@ import DealListClient from "@/components/DealListClient";
 import SortSelect from "@/components/SortSelect";
 import { queryDeals, parseSortKey, PAGE_SIZE } from "@/lib/deals";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300; // 5분마다 ISR 재생성
 
 const websiteJsonLd = {
   "@context": "https://schema.org",

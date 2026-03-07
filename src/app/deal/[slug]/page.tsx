@@ -8,7 +8,7 @@ import ViewTracker from "@/components/ViewTracker";
 import ClickTracker from "@/components/ClickTracker";
 import DealImage from "@/components/DealImage";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 1800; // 30분마다 ISR 재생성
 
 async function getProductById(id: string) {
     return prisma.product.findUnique({ where: { id } });
