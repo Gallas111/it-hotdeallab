@@ -2,7 +2,7 @@ name: 사이트 헬스체크
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # 6시간마다 자동 점검 (00:00, 06:00, 12:00, 18:00 UTC)
+    - cron: '0 15 * * *'  # 매일 1회 KST 00:00 (UTC 15:00)
   workflow_dispatch:         # 수동 실행 버튼
 
 jobs:
