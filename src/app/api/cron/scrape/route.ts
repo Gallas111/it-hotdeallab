@@ -4,12 +4,41 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 import { prisma } from "@/lib/prisma";
 
-// ─── Cloudflare Workers AI helper ────────────────────────────────────────────
+// ─── AI helper: Gemini first → CF Workers AI fallback ────────────────────────
 const CF_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 async function callCFAI(prompt: string, systemInstruction?: string): Promise<string> {
+    // 1st: Try Gemini
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (geminiKey) {
+        try {
+            const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+            const geminiResp = await fetch(geminiUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }],
+                    ...(systemInstruction && { systemInstruction: { parts: [{ text: systemInstruction }] } }),
+                    generationConfig: { maxOutputTokens: 8192 },
+                }),
+            });
+            if (geminiResp.status === 429) {
+                console.warn("⚡ Gemini 한도 초과 → CF Workers AI로 전환");
+            } else if (!geminiResp.ok) {
+                console.warn(`⚠️ Gemini 실패 (${geminiResp.status}) → CF Workers AI로 전환`);
+            } else {
+                const geminiData = await geminiResp.json() as any;
+                const text = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+                if (text) return text;
+            }
+        } catch (err: any) {
+            console.warn(`⚠️ Gemini 에러 → CF Workers AI로 전환: ${err.message}`);
+        }
+    }
+
+    // 2nd: CF Workers AI fallback
     const accountId = process.env.CF_ACCOUNT_ID;
     const apiToken = process.env.CF_API_TOKEN;
-    if (!accountId || !apiToken) throw new Error("CF_ACCOUNT_ID/CF_API_TOKEN 미설정");
+    if (!accountId || !apiToken) throw new Error("GEMINI_API_KEY 또는 CF_ACCOUNT_ID/CF_API_TOKEN 미설정");
     const messages: { role: string; content: string }[] = [];
     if (systemInstruction) messages.push({ role: "system", content: systemInstruction });
     messages.push({ role: "user", content: prompt });
