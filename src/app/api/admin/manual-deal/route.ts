@@ -3,7 +3,24 @@ import * as https from "node:https";
 import * as http from "node:http";
 import * as zlib from "node:zlib";
 import axios from "axios";
-import { GoogleGenAI } from "@google/genai";
+// Cloudflare Workers AI
+const CF_MODEL_MANUAL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+async function callCFAI_manual(prompt: string, systemInstruction?: string): Promise<string> {
+    const accountId = process.env.CF_ACCOUNT_ID;
+    const apiToken = process.env.CF_API_TOKEN;
+    if (!accountId || !apiToken) throw new Error("CF_ACCOUNT_ID/CF_API_TOKEN 미설정");
+    const messages: { role: string; content: string }[] = [];
+    if (systemInstruction) messages.push({ role: "system", content: systemInstruction });
+    messages.push({ role: "user", content: prompt });
+    const resp = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${CF_MODEL_MANUAL}`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${apiToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ messages, max_tokens: 8192 }),
+    });
+    if (!resp.ok) throw new Error(`CF AI error (${resp.status}): ${await resp.text()}`);
+    const data = await resp.json() as any;
+    return data.result?.response ?? "";
+}
 import { prisma } from "@/lib/prisma";
 import { getCoupangProductInfo } from "@/lib/coupang-scraper";
 
@@ -302,19 +319,14 @@ export async function POST(request: Request) {
             }, { status: 400 });
         }
 
-        // 5. Gemini AI 분석
-        const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-        const response = await genai.models.generateContent({
-            model: "gemini-2.5-flash-lite",
-            config: {
-                systemInstruction: `핫딜 큐레이터. 상품명과 가격으로 핫딜 정보 생성.
+        // 5. CF Workers AI 분석
+        const sysPrompt = `핫딜 큐레이터. 상품명과 가격으로 핫딜 정보 생성.
 반드시 JSON만 반환:
-{"refinedTitle":"제목(50자이내)","category":"골드박스|Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전|해외직구 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"300자이상 상세설명"}`,
-            },
-            contents: `상품명: ${pageTitle}\n현재가: ${rawPrice ? rawPrice + "원" : "정보 없음"}\n정가: ${rawOriginalPrice ? rawOriginalPrice + "원" : "정보 없음"}${webResult.discountPercent > 0 && !rawOriginalPrice ? `\n할인율 힌트: ${webResult.discountPercent}%` : ""}\n링크: ${productUrl}`,
-        });
-
-        const raw = (response.text ?? "").trim();
+{"refinedTitle":"제목(50자이내)","category":"골드박스|Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전|해외직구 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"300자이상 상세설명"}`;
+        const raw = (await callCFAI_manual(
+            `상품명: ${pageTitle}\n현재가: ${rawPrice ? rawPrice + "원" : "정보 없음"}\n정가: ${rawOriginalPrice ? rawOriginalPrice + "원" : "정보 없음"}${webResult.discountPercent > 0 && !rawOriginalPrice ? `\n할인율 힌트: ${webResult.discountPercent}%` : ""}\n링크: ${productUrl}`,
+            sysPrompt
+        )).trim();
         const jsonMatch = raw.match(/\{[\s\S]*\}/);
         if (!jsonMatch) throw new Error(`AI 응답 파싱 실패: ${raw.substring(0, 100)}`);
         const aiData = JSON.parse(jsonMatch[0]);

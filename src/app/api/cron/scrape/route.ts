@@ -2,8 +2,26 @@ import { NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import axios from "axios";
 import * as cheerio from "cheerio";
-import { GoogleGenAI } from "@google/genai";
 import { prisma } from "@/lib/prisma";
+
+// ─── Cloudflare Workers AI helper ────────────────────────────────────────────
+const CF_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+async function callCFAI(prompt: string, systemInstruction?: string): Promise<string> {
+    const accountId = process.env.CF_ACCOUNT_ID;
+    const apiToken = process.env.CF_API_TOKEN;
+    if (!accountId || !apiToken) throw new Error("CF_ACCOUNT_ID/CF_API_TOKEN 미설정");
+    const messages: { role: string; content: string }[] = [];
+    if (systemInstruction) messages.push({ role: "system", content: systemInstruction });
+    messages.push({ role: "user", content: prompt });
+    const resp = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${CF_MODEL}`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${apiToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ messages, max_tokens: 8192 }),
+    });
+    if (!resp.ok) throw new Error(`CF AI error (${resp.status}): ${await resp.text()}`);
+    const data = await resp.json() as any;
+    return data.result?.response ?? "";
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -764,9 +782,8 @@ const CODE_FIX_RULES: Record<string, { files: string[]; prompt: string }> = {
 
 async function autoFixCodeIssue(issue: CodeIssue): Promise<string | null> {
     const githubToken = process.env.GITHUB_TOKEN;
-    const geminiKey = process.env.GEMINI_API_KEY;
-    if (!githubToken || !geminiKey) {
-        console.log("[Code Fix] GITHUB_TOKEN 또는 GEMINI_API_KEY 미설정");
+    if (!githubToken || !process.env.CF_ACCOUNT_ID || !process.env.CF_API_TOKEN) {
+        console.log("[Code Fix] GITHUB_TOKEN 또는 CF_ACCOUNT_ID/CF_API_TOKEN 미설정");
         return null;
     }
 
@@ -811,15 +828,12 @@ async function autoFixCodeIssue(issue: CodeIssue): Promise<string | null> {
 
         if (fileContents.length === 0) return null;
 
-        // Gemini에게 수정 요청
-        const genai = new GoogleGenAI({ apiKey: geminiKey });
+        // CF Workers AI에게 수정 요청
         const filesContext = fileContents.map(f =>
             `=== ${f.path} ===\n\`\`\`typescript\n${f.content}\n\`\`\``
         ).join("\n\n");
 
-        const response = await genai.models.generateContent({
-            model: "gemini-2.5-flash-lite",
-            contents: `당신은 Next.js/TypeScript 전문 개발자입니다. 프로덕션 사이트에서 다음 문제가 발생했습니다:
+        const raw = (await callCFAI(`당신은 Next.js/TypeScript 전문 개발자입니다. 프로덕션 사이트에서 다음 문제가 발생했습니다:
 
 문제: ${issue.description}
 ${issue.errorLog ? `에러 로그: ${issue.errorLog}` : ""}
@@ -833,10 +847,7 @@ ${filesContext}
 [{"path": "파일경로", "content": "수정된 전체 파일 내용"}, ...]
 
 수정이 필요 없는 파일은 배열에 포함하지 마세요.
-수정할 내용이 없으면 빈 배열 []을 반환하세요.`,
-        });
-
-        const raw = (response.text ?? "").trim();
+수정할 내용이 없으면 빈 배열 []을 반환하세요.`)).trim();
         const jsonMatch = raw.match(/\[[\s\S]*\]/);
         if (!jsonMatch) {
             console.log("[Code Fix] Gemini 응답에서 JSON 파싱 실패");
@@ -1295,8 +1306,6 @@ async function isDealExpired(affiliateLink: string): Promise<boolean> {
 // 메인 핸들러
 // ═══════════════════════════════════════════════════════════
 async function runScrape() {
-    const genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-
     // ── 1. 만료 딜 처리 ──────────────────────────────────────
     // 7일 이상 → 무조건 삭제
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -1363,13 +1372,10 @@ async function runScrape() {
         if (exists) continue;
         newProcessed++;
 
-        // Claude: IT 핫딜 여부 판별
+        // CF Workers AI: IT 핫딜 여부 판별
         let aiData: any = {};
         try {
-            const response = await genai.models.generateContent({
-                model: "gemini-2.5-flash-lite",
-                config: {
-                    systemInstruction: `IT·가전·스마트홈 핫딜 전문 큐레이터. 아래 두 조건을 모두 충족해야만 등록.
+            const systemPrompt = `IT·가전·스마트홈 핫딜 전문 큐레이터. 아래 두 조건을 모두 충족해야만 등록.
 
 [등록 가능 제품군]
 - IT/전자기기: 노트북, 스마트폰, 태블릿, 모니터, 이어폰, 키보드, 마우스, SSD, 그래픽카드 등
@@ -1408,11 +1414,8 @@ async function runScrape() {
 
 반드시 JSON만 반환. 조건 미충족: {"isIT":false}
 조건 충족 시:
-{"isIT":true,"refinedTitle":"가격 혜택 강조 제목(50자이내)","category":"골드박스|Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전|해외직구 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄(예:20%할인/역대최저/오늘만특가)","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"500자이상 상세설명"}`,
-                },
-                contents: `출처:${deal.source} 제목:${deal.title}`,
-            });
-            const raw = (response.text ?? "").trim();
+{"isIT":true,"refinedTitle":"가격 혜택 강조 제목(50자이내)","category":"골드박스|Apple|삼성/LG|노트북/PC|모니터/주변기기|음향/스마트기기|생활가전|해외직구 중 하나","originalPrice":정가숫자(모르면0),"salePrice":할인가숫자(모르면0),"discountInfo":"할인 핵심 한줄(예:20%할인/역대최저/오늘만특가)","aiSummary":"한줄요약(60자이내)","aiPros":"장점1, 장점2, 장점3","aiTarget":"추천대상(40자이내)","seoContent":"500자이상 상세설명"}`;
+            const raw = (await callCFAI(`출처:${deal.source} 제목:${deal.title}`, systemPrompt)).trim();
             const jsonMatch = raw.match(/\{[\s\S]*\}/);
             if (!jsonMatch) throw new Error("no JSON in response");
             aiData = JSON.parse(jsonMatch[0]);
@@ -1555,8 +1558,8 @@ export async function GET(request: Request) {
         }
     }
 
-    if (!process.env.GEMINI_API_KEY) {
-        return NextResponse.json({ error: "GEMINI_API_KEY 환경변수 미설정" }, { status: 500 });
+    if (!process.env.CF_ACCOUNT_ID || !process.env.CF_API_TOKEN) {
+        return NextResponse.json({ error: "CF_ACCOUNT_ID/CF_API_TOKEN 환경변수 미설정" }, { status: 500 });
     }
 
     // 즉시 202 응답 후 백그라운드에서 크롤링 처리 (cron-job.org 30초 타임아웃 우회)

@@ -1,6 +1,20 @@
 import { NextResponse } from "next/server";
 import axios from "axios";
-import { GoogleGenAI } from "@google/genai";
+// Cloudflare Workers AI
+const CF_MODEL_REPAIR = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+async function callCFAI_repair(prompt: string): Promise<string> {
+    const accountId = process.env.CF_ACCOUNT_ID;
+    const apiToken = process.env.CF_API_TOKEN;
+    if (!accountId || !apiToken) throw new Error("CF_ACCOUNT_ID/CF_API_TOKEN 미설정");
+    const resp = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${CF_MODEL_REPAIR}`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${apiToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: [{ role: "user", content: prompt }], max_tokens: 8192 }),
+    });
+    if (!resp.ok) throw new Error(`CF AI error (${resp.status}): ${await resp.text()}`);
+    const data = await resp.json() as any;
+    return data.result?.response ?? "";
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,10 +61,9 @@ function extractFunction(code: string, funcName: string): string {
 
 export async function POST(request: Request) {
     const githubToken = process.env.GITHUB_TOKEN;
-    const geminiKey = process.env.GEMINI_API_KEY;
 
-    if (!githubToken || !geminiKey) {
-        return NextResponse.json({ error: "GITHUB_TOKEN 또는 GEMINI_API_KEY 미설정" }, { status: 500 });
+    if (!githubToken || !process.env.CF_ACCOUNT_ID || !process.env.CF_API_TOKEN) {
+        return NextResponse.json({ error: "GITHUB_TOKEN 또는 CF_ACCOUNT_ID/CF_API_TOKEN 미설정" }, { status: 500 });
     }
 
     const { source } = await request.json();
@@ -93,10 +106,7 @@ export async function POST(request: Request) {
         }
 
         // ── 4. Claude에게 수정 코드 요청 ────────────────────────────
-        const genai = new GoogleGenAI({ apiKey: geminiKey });
-        const response = await genai.models.generateContent({
-            model: "gemini-2.5-flash-lite",
-            contents: `웹 스크레이퍼가 고장났습니다. 아래 함수가 0개의 결과를 반환하고 있습니다. 웹사이트의 HTML 구조가 변경된 것이 원인입니다.
+        const newFunc = (await callCFAI_repair(`웹 스크레이퍼가 고장났습니다. 아래 함수가 0개의 결과를 반환하고 있습니다. 웹사이트의 HTML 구조가 변경된 것이 원인입니다.
 
 현재 함수 코드:
 \`\`\`typescript
@@ -116,10 +126,7 @@ HTML을 분석하여 핫딜/세일 게시글 목록을 올바르게 추출하는
 - 최대 15개 항목 추출
 - axios와 cheerio($)는 이미 import됨
 - try/catch로 에러 처리, 실패 시 [] 반환
-- 코드만 반환 (설명 없이, 마크다운 코드블록 없이)`,
-        });
-
-        const newFunc = (response.text ?? "").trim();
+- 코드만 반환 (설명 없이, 마크다운 코드블록 없이)`)).trim();
 
         // ── 5. 파일에서 함수 교체 ───────────────────────────────────
         const newCode = currentCode.replace(currentFunc, newFunc);
