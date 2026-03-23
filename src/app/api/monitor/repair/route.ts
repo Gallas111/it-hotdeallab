@@ -30,10 +30,31 @@ async function callCFAI_repair(prompt: string): Promise<string> {
         }
     }
 
-    // 2nd: CF Workers AI fallback
+    // 2nd: Try Groq
+    const groqKey = process.env.GROQ_API_KEY;
+    if (groqKey) {
+        try {
+            const groqResp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: prompt }], max_tokens: 8192 }),
+            });
+            if (groqResp.status === 429) {
+                console.warn('⚡ Groq 한도 초과 → CF Workers AI로 전환');
+            } else if (groqResp.ok) {
+                const groqData = await groqResp.json() as any;
+                const text = groqData.choices?.[0]?.message?.content?.trim() || '';
+                if (text) return text;
+            }
+        } catch (err: any) {
+            console.warn(`⚠️ Groq 실패 → CF Workers AI로 전환: ${err.message}`);
+        }
+    }
+
+    // 3rd: CF Workers AI fallback
     const accountId = process.env.CF_ACCOUNT_ID;
     const apiToken = process.env.CF_API_TOKEN;
-    if (!accountId || !apiToken) throw new Error("GEMINI_API_KEY 또는 CF_ACCOUNT_ID/CF_API_TOKEN 미설정");
+    if (!accountId || !apiToken) throw new Error("GEMINI_API_KEY, Groq, 또는 CF_ACCOUNT_ID/CF_API_TOKEN 미설정");
     const resp = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${CF_MODEL_REPAIR}`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${apiToken}`, "Content-Type": "application/json" },
