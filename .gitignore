@@ -50,4 +50,5 @@ next-env.d.ts
 /src/generated/prisma
 /dev.db
 
-.vercel
+# credentials
+google-credentials.json
