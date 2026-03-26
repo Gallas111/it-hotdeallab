@@ -1602,13 +1602,15 @@ async function runScrape() {
 }
 
 export async function GET(request: Request) {
-    // CRON_SECRET 인증 (설정된 경우에만 검증)
+    // CRON_SECRET 인증 (필수)
     const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret) {
-        const auth = request.headers.get("authorization");
-        if (auth !== `Bearer ${cronSecret}`) {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-        }
+    if (!cronSecret) {
+        console.error("CRON_SECRET environment variable is not set");
+        return NextResponse.json({ error: "Server configuration error" }, { status: 500 });
+    }
+    const auth = request.headers.get("authorization");
+    if (auth !== `Bearer ${cronSecret}`) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     if (!process.env.CF_ACCOUNT_ID || !process.env.CF_API_TOKEN) {
