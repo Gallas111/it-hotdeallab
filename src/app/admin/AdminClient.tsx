@@ -44,10 +44,10 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
     const [imageUpdateStatus, setImageUpdateStatus] = useState<"idle" | "loading" | "done">("idle");
     const [imageUpdateResult, setImageUpdateResult] = useState<string>("");
 
-    // 탭별 sessionStorage로 인증 상태 확인 (탭/창 닫으면 초기화)
+    // 서버에서 initialProducts가 있으면 인증된 상태
     useEffect(() => {
-        setAuthed(sessionStorage.getItem("admin-auth") === "1");
-    }, []);
+        setAuthed(initialProducts.length > 0 || sessionStorage.getItem("admin-auth") === "1");
+    }, [initialProducts]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -60,7 +60,9 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
         });
         if (res.ok) {
             sessionStorage.setItem("admin-auth", "1");
-            setAuthed(true);
+            // 쿠키 설정 후 페이지 새로고침 (서버에서 데이터 가져오기)
+            window.location.reload();
+            return;
         } else {
             setPwError(true);
             setPw("");
