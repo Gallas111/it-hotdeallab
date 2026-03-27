@@ -307,16 +307,30 @@ async function searchNaverShopping(query: string): Promise<{
     }
 }
 
-// SSRF 방어: 허용된 도메인만 허용
+// SSRF 방어: 내부 네트워크 접근 차단
 function isAllowedUrl(url: string): boolean {
     try {
         const parsed = new URL(url);
         if (!["http:", "https:"].includes(parsed.protocol)) return false;
         const host = parsed.hostname.toLowerCase();
-        // 내부 IP / localhost 차단
-        if (host === "localhost" || host.startsWith("127.") || host.startsWith("10.")
-            || host.startsWith("192.168.") || host.startsWith("169.254.")
-            || host === "0.0.0.0" || host.includes("metadata")) return false;
+        // IPv6 차단 (브라켓 포함)
+        if (host.includes("[") || host.includes(":")) return false;
+        // localhost / 내부 IP 차단
+        if (host === "localhost" || host === "0.0.0.0") return false;
+        if (host.startsWith("127.") || host.startsWith("10.") || host.startsWith("192.168.")) return false;
+        if (host.startsWith("169.254.") || host.startsWith("172.")) {
+            // 172.16.0.0 ~ 172.31.255.255 차단
+            if (host.startsWith("172.")) {
+                const second = parseInt(host.split(".")[1], 10);
+                if (second >= 16 && second <= 31) return false;
+            } else {
+                return false;
+            }
+        }
+        // 클라우드 메타데이터 차단
+        if (host.includes("metadata") || host.includes("internal")) return false;
+        // 숫자/hex IP 차단 (0x, 0으로 시작하는 옥탈 등)
+        if (/^(0x|0\d)/.test(host) || /^\d+$/.test(host)) return false;
         return true;
     } catch {
         return false;

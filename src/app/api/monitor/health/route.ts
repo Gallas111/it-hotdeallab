@@ -26,8 +26,9 @@ export async function GET() {
             { status: isHealthy ? 200 : 503 }
         );
     } catch (error: any) {
+        console.error("[health] error:", error.message);
         return NextResponse.json(
-            { status: "error", error: error.message },
+            { status: "error", error: "서버 오류" },
             { status: 500 }
         );
     }

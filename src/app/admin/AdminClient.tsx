@@ -75,7 +75,7 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
         setScrapeStatus("loading");
         setScrapeResult("");
         try {
-            const res = await fetch("/api/cron/scrape");
+            const res = await fetch("/api/admin/scrape", { method: "POST" });
             const data = await res.json();
             if (data.success) {
                 const added = data.added as string[];

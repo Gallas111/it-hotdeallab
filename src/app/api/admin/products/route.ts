@@ -27,7 +27,13 @@ export async function GET() {
 }
 
 export async function PATCH(request: Request) {
-    const { id, affiliateLink, imageUrl, salePrice, originalPrice } = await request.json();
+    let body: any;
+    try {
+        body = await request.json();
+    } catch {
+        return NextResponse.json({ error: "잘못된 요청 형식" }, { status: 400 });
+    }
+    const { id, affiliateLink, imageUrl, salePrice, originalPrice } = body;
     if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
     const data: Record<string, any> = {};
     if (affiliateLink) data.affiliateLink = affiliateLink;

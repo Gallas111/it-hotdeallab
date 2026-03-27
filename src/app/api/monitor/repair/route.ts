@@ -220,6 +220,7 @@ HTML을 분석하여 핫딜/세일 게시글 목록을 올바르게 추출하는
         return NextResponse.json({ success: true, source, message: `${source} 자동 수정 완료` });
 
     } catch (error: any) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        console.error("[repair] error:", error.message);
+        return NextResponse.json({ error: "수정 처리 중 오류가 발생했습니다" }, { status: 500 });
     }
 }

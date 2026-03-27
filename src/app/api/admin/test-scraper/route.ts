@@ -58,6 +58,7 @@ export async function POST(request: Request) {
             ldJson,
         });
     } catch (e: any) {
-        return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+        console.error("[test-scraper] error:", e.message);
+        return NextResponse.json({ success: false, error: "스크래퍼 테스트 중 오류가 발생했습니다" }, { status: 500 });
     }
 }

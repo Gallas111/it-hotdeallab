@@ -141,6 +141,7 @@ export async function POST() {
 
         return NextResponse.json({ success: true, total: products.length, updated, changes });
     } catch (error: any) {
-        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+        console.error("[sync-prices] error:", error.message);
+        return NextResponse.json({ success: false, error: "가격 동기화 중 오류가 발생했습니다" }, { status: 500 });
     }
 }
