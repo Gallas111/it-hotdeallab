@@ -27,4 +27,9 @@ model Product {
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  @@index([isActive, createdAt])
+  @@index([isActive, category])
+  @@index([isActive, viewCount])
+  @@index([createdAt])
 }

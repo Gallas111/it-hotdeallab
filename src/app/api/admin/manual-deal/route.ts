@@ -307,11 +307,31 @@ async function searchNaverShopping(query: string): Promise<{
     }
 }
 
+// SSRF 방어: 허용된 도메인만 허용
+function isAllowedUrl(url: string): boolean {
+    try {
+        const parsed = new URL(url);
+        if (!["http:", "https:"].includes(parsed.protocol)) return false;
+        const host = parsed.hostname.toLowerCase();
+        // 내부 IP / localhost 차단
+        if (host === "localhost" || host.startsWith("127.") || host.startsWith("10.")
+            || host.startsWith("192.168.") || host.startsWith("169.254.")
+            || host === "0.0.0.0" || host.includes("metadata")) return false;
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 export async function POST(request: Request) {
     try {
         const { affiliateLink, category: forceCategory } = await request.json();
         if (!affiliateLink) {
             return NextResponse.json({ error: "affiliateLink 필요" }, { status: 400 });
+        }
+
+        if (!isAllowedUrl(affiliateLink)) {
+            return NextResponse.json({ error: "허용되지 않은 URL입니다" }, { status: 400 });
         }
 
         // 1. 실제 상품 URL 확보
@@ -421,6 +441,7 @@ export async function POST(request: Request) {
             message: `"${product.title}" 등록 완료`,
         });
     } catch (error: any) {
-        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+        console.error("[manual-deal] error:", error.message);
+        return NextResponse.json({ success: false, error: "처리 중 오류가 발생했습니다" }, { status: 500 });
     }
 }

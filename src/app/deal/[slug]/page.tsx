@@ -30,7 +30,7 @@ async function getProductById(id: string) {
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
     const { slug: id } = await params;
-    const p = await getProductById(id);
+    const p = await getProductById(id).catch(() => null);
     if (!p) return { title: "핫딜을 찾을 수 없습니다" };
 
     const title = `${p.title} - ${p.discountPercent > 0 ? `${p.discountPercent}% 할인` : "핫딜"}`;

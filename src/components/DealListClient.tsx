@@ -90,11 +90,7 @@ export default function DealListClient({ initialDeals, hasMore: initialHasMore, 
                     등록된 핫딜이 없습니다
                 </p>
                 <p style={{ fontSize: 13, color: "var(--muted)" }}>
-                    {q ? "다른 검색어를 시도해보세요" : (
-                        <a href="/admin" style={{ color: "var(--primary)", fontWeight: 700, textDecoration: "none" }}>
-                            관리 페이지
-                        </a>
-                    )}
+                    {q ? "다른 검색어를 시도해보세요" : "곧 새로운 핫딜이 등록됩니다"}
                 </p>
             </div>
         );

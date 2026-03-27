@@ -3,8 +3,15 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
     images: {
         remotePatterns: [
-            { protocol: "https", hostname: "**" },
-            { protocol: "http", hostname: "**" },
+            { protocol: "https", hostname: "**.coupang.com" },
+            { protocol: "https", hostname: "**.naver.net" },
+            { protocol: "https", hostname: "**.pstatic.net" },
+            { protocol: "https", hostname: "**.alicdn.com" },
+            { protocol: "https", hostname: "**.11st.co.kr" },
+            { protocol: "https", hostname: "**.tmon.co.kr" },
+            { protocol: "https", hostname: "**.wemakeprice.com" },
+            { protocol: "https", hostname: "**.gmarket.co.kr" },
+            { protocol: "https", hostname: "**.auction.co.kr" },
         ],
     },
     async headers() {

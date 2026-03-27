@@ -410,7 +410,7 @@ export default function AdminClient({ initialProducts }: { initialProducts: Prod
                 <div className="flex items-center gap-3">
                     <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-indigo-100 text-indigo-600 text-[14px] shrink-0">🔄</span>
                     <h3 className="text-[16px] font-extrabold text-[var(--foreground)]">핫딜 자동 수집</h3>
-                    <span className="text-[11px] text-gray-400 font-medium">10분마다 자동 실행</span>
+                    <span className="text-[11px] text-gray-400 font-medium">매일 자동 실행</span>
                 </div>
                 <div className="flex gap-2 flex-wrap">
                     <button
